@@ -1,0 +1,11 @@
+{
+  "name": "pesantren-merah-putih-3d",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:glb": "node scripts/build-glb.mjs"
+  },
+  "dependencies": {
+    "three": "0.160.0"
+  }
+}

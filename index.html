@@ -95,13 +95,16 @@
   <div class="stage" id="stage">
     <div id="scene"></div>
     <div class="toolbar">
-      <button id="btn-3d" aria-pressed="true">Perspektif</button>
-      <button id="btn-top" aria-pressed="false">Tampak Atas</button>
+      <button id="mode-out" aria-pressed="true">Tampak Luar</button>
+      <button id="mode-1" aria-pressed="false">Interior Lt.1</button>
+      <button id="mode-2" aria-pressed="false">Interior Lt.2</button>
+      <button id="btn-top">Tampak Atas</button>
+      <button id="btn-3d">Perspektif</button>
       <button id="btn-labels" aria-pressed="true">Label</button>
       <button id="btn-rotate" aria-pressed="false">Putar Otomatis</button>
       <button id="btn-glb">Unduh .glb</button>
     </div>
-    <div class="hint">Seret untuk memutar · scroll/cubit untuk zoom · klik bangunan untuk detail</div>
+    <div class="hint" id="hint">Memuat model…</div>
   </div>
 
   <div class="below">
@@ -124,8 +127,8 @@
       <h2>Detail</h2>
       <p class="name" id="info-name">Pilih bangunan</p>
       <p class="meta" id="info-meta">Klik bangunan di model atau baris di tabel.</p>
-      <p id="info-desc">Model memakai ukuran dari denah tapak: Asrama di sisi barat, Masjid di tengah, layanan dan pengelola di sisi timur, lapangan di selatan. Utara mengarah ke gerbang utama.</p>
-      <p class="note">Tombol “Unduh .glb” menyimpan model untuk dibuka di Blender, SketchUp, atau penampil 3D lain. Jika tombol tidak merespons di pratinjau, buka file <code>index.html</code> langsung di browser.</p>
+      <p id="info-desc">Pilih “Interior Lt.1” untuk membuka atap dan melihat isi ruangan: ranjang susun, rak Al-Qur'an, nampan makan, meja kelas, bed klinik, dan lainnya. “Interior Lt.2” menampilkan lantai atas Asrama, Kantor, dan Mess.</p>
+      <p class="note">File <code>pesantren-merah-putih.glb</code> berisi model yang sama, lengkap dengan isi ruangan, untuk dibuka di Blender, SketchUp, atau penampil 3D lain. Tombol “Unduh .glb” berfungsi saat <code>index.html</code> dibuka langsung di browser.</p>
     </section>
   </div>
 </div>
@@ -141,39 +144,18 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
-
-// Ukuran tapak dalam meter (diukur dari skala 0–20 m pada denah). x = barat→timur, z = utara→selatan.
-const SITE_W = 60, SITE_D = 100;
-const COLORS = { santri: 0xC8102E, ibadah: 0xE0A100, layanan: 0xB34834, pengelola: 0x6F0A1C, luar: 0x9DB08A };
-const ZONE = { santri: 'Santri', ibadah: 'Ibadah', layanan: 'Layanan', pengelola: 'Pengelola', luar: 'Ruang Luar' };
-
-// [id, nama, zona, x0, z0, x1, z1, lantai, luas, rincian]
-const ITEMS = [
-  ['asrama', 'Asrama Santri', 'santri', 2, 19, 20, 79.3, 2, 972, '9 kamar × 24 santri (4 m²/santri) + 27 unit KM/WC.'],
-  ['masjid', 'Masjid / Mushola', 'ibadah', 23.1, 25.1, 44.2, 47.2, 1, 450, 'Ruang shalat & halaqah, ruang wudhu, serambi. Menampung ±246 jamaah.'],
-  ['serbaguna', 'Ruang Serbaguna', 'layanan', 47.2, 19.1, 58.2, 42.2, 1, 180, '6 ruang × 30 m² untuk materi pendamping dan cadangan halaqah.'],
-  ['klinik', 'Klinik', 'layanan', 47.2, 44.2, 58.2, 55.3, 1, 60, 'Ruang periksa, 2 bed observasi, ruang obat.'],
-  ['dapur', "Dapur & Mat'am", 'layanan', 23.1, 50.3, 44.2, 78.3, 1, 460, "Dapur 80 m² + ruang makan lesehan 1,5 m²/orang (±246 orang)."],
-  ['mess', 'Mess Musyrif & Guru', 'pengelola', 47.2, 57.3, 58.2, 78.3, 2, 120, '±20 pengurus tinggal di lokasi (6 m²/orang).'],
-  ['kantor', 'Kantor Administrasi', 'pengelola', 44.5, 2, 58.2, 14.1, 2, 150, 'Ruang pimpinan, koordinator, dan staf admin.'],
-  ['posjaga', 'Pos Jaga', 'pengelola', 36.3, 1.5, 42.9, 10.7, 1, 9, 'Pos security di gerbang utama (1 dari 3 titik × 9 m²).'],
-  ['posbarat', 'Pos Barat Daya', 'pengelola', 2, 88.2, 6.4, 93.4, 1, 9, 'Pos security sudut barat daya.'],
-  ['postimur', 'Pos Tenggara', 'pengelola', 53.8, 88.2, 58.2, 93.4, 1, 9, 'Pos security sudut tenggara.'],
-  ['parkir', 'Parkir & RTH', 'luar', 2, 2, 22.6, 14.1, 0, 300, 'Area parkir dan ruang terbuka hijau (sarana luar).'],
-  ['lapangan', 'Lapangan Serbaguna', 'luar', 7.8, 82.4, 52.3, 98.5, 0, 600, 'Lapangan olahraga & keterampilan hidup (sarana luar).'],
-];
-const FLOOR_H = 3.6;
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { buildSite, SITE_W, SITE_D, ZONE_NAMES } from './model.js';
 
 const host = document.getElementById('scene');
 const stage = document.getElementById('stage');
 const css = () => getComputedStyle(document.documentElement);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 host.appendChild(renderer.domElement);
-
 const labelRenderer = new CSS2DRenderer();
 labelRenderer.domElement.style.cssText = 'position:absolute;inset:0;pointer-events:none';
 host.appendChild(labelRenderer.domElement);
@@ -184,162 +166,120 @@ applyThemeBg();
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyThemeBg);
 new MutationObserver(applyThemeBg).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 
-const camera = new THREE.PerspectiveCamera(40, 1, 0.5, 1000);
+const camera = new THREE.PerspectiveCamera(40, 1, 0.2, 1000);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
-controls.maxPolarAngle = Math.PI / 2 - 0.05;
-controls.minDistance = 15;
+controls.maxPolarAngle = Math.PI / 2 - 0.03;
+controls.minDistance = 3;
 controls.maxDistance = 260;
 
 scene.add(new THREE.HemisphereLight(0xfff6ea, 0x8a7a6a, 1.1));
-const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+const sun = new THREE.DirectionalLight(0xffffff, 1.5);
 sun.position.set(-40, 80, -30);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.bias = -0.0005;
 Object.assign(sun.shadow.camera, { left: -70, right: 70, top: 70, bottom: -70, far: 250 });
 scene.add(sun);
+const outer = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshStandardMaterial({ color: 0xCFC3AE, roughness: 1 }));
+outer.rotation.x = -Math.PI / 2; outer.position.y = -0.06; outer.receiveShadow = true;
+scene.add(outer);
 
-// Semua objek tapak masuk ke grup ini supaya bisa diekspor sebagai satu GLB.
-const site = new THREE.Group();
-site.name = 'Pesantren_Merah_Putih_Tapak';
+// Model asli (dipakai untuk ekspor) + salinan yang digabung per material agar ringan di layar.
+const { site, meta, gateLabel } = buildSite();
 site.position.set(-SITE_W / 2, 0, -SITE_D / 2);
-scene.add(site);
 
-const mat = (color, opts = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.85, ...opts });
-const box = (w, h, d, m) => { const g = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); g.castShadow = g.receiveShadow = true; return g; };
+function mergeGroup(g) {
+  g.updateMatrixWorld(true);
+  const inv = g.matrixWorld.clone().invert(), buckets = new Map();
+  g.traverse(o => {
+    if (!o.isMesh) return;
+    let geo = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+    geo.deleteAttribute('uv');
+    geo.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld));
+    if (!buckets.has(o.material)) buckets.set(o.material, []);
+    buckets.get(o.material).push(geo);
+  });
+  const out = new THREE.Group();
+  out.position.copy(g.position); out.rotation.copy(g.rotation); out.scale.copy(g.scale);
+  out.name = g.name; out.userData = { ...g.userData };
+  for (const [mat, geos] of buckets) {
+    const mesh = new THREE.Mesh(mergeGeometries(geos), mat);
+    mesh.castShadow = !mat.transparent; mesh.receiveShadow = true;
+    mesh.userData.id = g.userData.id;
+    out.add(mesh);
+  }
+  return out;
+}
+function viewCopy(src) {
+  if (src.userData.merge) return mergeGroup(src);
+  const c = new THREE.Group();
+  c.position.copy(src.position); c.rotation.copy(src.rotation); c.name = src.name; c.userData = { ...src.userData };
+  src.children.forEach(ch => c.add(viewCopy(ch)));
+  return c;
+}
+const view = viewCopy(site);
+scene.add(view);
 
-// Lahan & jalan sirkulasi
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(SITE_W, SITE_D), mat(0xE9DCC8));
-ground.rotation.x = -Math.PI / 2; ground.position.set(SITE_W / 2, 0, SITE_D / 2); ground.receiveShadow = true; ground.name = 'Lahan';
-site.add(ground);
-const outer = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), mat(0xCFC3AE));
-outer.rotation.x = -Math.PI / 2; outer.position.set(SITE_W / 2, -0.05, SITE_D / 2); outer.receiveShadow = true;
-scene.add(outer); // sekitar tapak, tidak ikut diekspor
+const pickables = [], roofs = [], upper = [];
+view.traverse(o => {
+  if (o.isMesh && o.userData.id) pickables.push(o);
+  if (o.userData.part === 'roof') roofs.push(o);
+  if (o.userData.floor >= 1) upper.push(o);
+});
 
-// Pagar keliling dengan bukaan gerbang (x 25–35 di sisi utara)
-const fenceMat = mat(0xB89A6A);
-const fence = new THREE.Group(); fence.name = 'Pagar';
-const addWall = (x0, z0, x1, z1) => {
-  const w = Math.max(Math.abs(x1 - x0), 0.25), d = Math.max(Math.abs(z1 - z0), 0.25);
-  const m = box(w, 1.8, d, fenceMat); m.position.set((x0 + x1) / 2, 0.9, (z0 + z1) / 2); fence.add(m);
-};
-addWall(0, 0, 25, 0); addWall(35, 0, SITE_W, 0);
-addWall(0, SITE_D, SITE_W, SITE_D); addWall(0, 0, 0, SITE_D); addWall(SITE_W, 0, SITE_W, SITE_D);
-const gateMat = mat(COLORS.santri);
-[25, 35].forEach(x => { const p = box(0.8, 3.6, 0.8, gateMat); p.position.set(x, 1.8, 0); fence.add(p); });
-const beam = box(10.8, 0.8, 0.8, gateMat); beam.position.set(30, 3.6, 0); beam.name = 'Gerbang_Utama'; fence.add(beam);
-site.add(fence);
-const gateLabel = makeLabel('Gerbang Utama', '');
-gateLabel.position.set(30, 4.6, 0); site.add(gateLabel);
-
+// Label
 function makeLabel(title, sub) {
   const el = document.createElement('div');
-  el.className = 'label';
-  el.textContent = title;
+  el.className = 'label'; el.textContent = title;
   if (sub) { const s = document.createElement('small'); s.textContent = sub; el.appendChild(s); }
   return new CSS2DObject(el);
 }
-
-// Bangunan
-const pickables = [];
 const byId = {};
-const winMat = mat(0xF6EDE0, { roughness: 0.4 });
-const roofMat = mat(0x3B2A25);
-
-ITEMS.forEach(([id, name, zone, x0, z0, x1, z1, floors, area, desc]) => {
-  const w = x1 - x0, d = z1 - z0, cx = x0 + w / 2, cz = z0 + d / 2;
-  const g = new THREE.Group(); g.name = name; g.userData = { id };
-  const baseColor = COLORS[zone];
-  let topY;
-
-  if (floors === 0) {
-    const pad = box(w, 0.15, d, mat(baseColor)); pad.position.set(cx, 0.075, cz); g.add(pad);
-    if (id === 'lapangan') {
-      const lineM = mat(0xFFFFFF);
-      const l1 = box(w - 2, 0.02, 0.15, lineM); l1.position.set(cx, 0.16, cz); g.add(l1);
-      const ring = new THREE.Mesh(new THREE.RingGeometry(2.6, 2.8, 40), lineM); ring.rotation.x = -Math.PI / 2; ring.position.set(cx, 0.17, cz); g.add(ring);
-    } else {
-      // pohon RTH di tepi parkir
-      const trunk = mat(0x6B4B33), leaf = mat(0x5E7F4A);
-      for (let i = 0; i < 6; i++) {
-        const tx = x0 + 1.5 + i * (w - 3) / 5, tz = z0 + 1.4;
-        const t = box(0.3, 1.6, 0.3, trunk); t.position.set(tx, 0.8, tz); g.add(t);
-        const c = new THREE.Mesh(new THREE.SphereGeometry(1.2, 12, 10), leaf); c.position.set(tx, 2.4, tz); c.castShadow = true; g.add(c);
-      }
-      const stripe = mat(0xF2EDE4);
-      for (let i = 0; i < 7; i++) { const s = box(0.12, 0.02, 4.5, stripe); s.position.set(x0 + 3 + i * 2.6, 0.16, z1 - 3.4); g.add(s); }
-    }
-    topY = 0.6;
-  } else {
-    const h = floors * FLOOR_H;
-    const body = box(w, h, d, mat(baseColor)); body.position.set(cx, h / 2, cz); body.name = name + '_Badan'; g.add(body);
-    // atap datar tipis dengan tepian
-    const roof = box(w + 0.6, 0.35, d + 0.6, mat(new THREE.Color(baseColor).multiplyScalar(0.82))); roof.position.set(cx, h + 0.17, cz); g.add(roof);
-    // garis lantai
-    for (let f = 1; f < floors; f++) { const b = box(w + 0.12, 0.25, d + 0.12, roofMat); b.position.set(cx, f * FLOOR_H, cz); g.add(b); }
-    // jendela di sisi panjang
-    const long = d >= w;
-    const len = long ? d : w;
-    const n = Math.max(1, Math.floor((len - 2) / 3.2));
-    for (let f = 0; f < floors; f++) {
-      for (let i = 0; i < n; i++) {
-        const t = -len / 2 + 1 + (i + 0.5) * (len - 2) / n;
-        const y = f * FLOOR_H + 1.9;
-        for (const side of [-1, 1]) {
-          const win = long ? box(0.08, 1.2, 1.4, winMat) : box(1.4, 1.2, 0.08, winMat);
-          win.castShadow = false;
-          if (long) win.position.set(cx + side * (w / 2 + 0.03), y, cz + t);
-          else win.position.set(cx + t, y, cz + side * (d / 2 + 0.03));
-          g.add(win);
-        }
-      }
-    }
-    topY = h + 0.6;
-
-    if (id === 'masjid') {
-      const domeM = mat(0xF1C64A, { roughness: 0.5, metalness: 0.2 });
-      const drum = new THREE.Mesh(new THREE.CylinderGeometry(5.2, 5.2, 1.4, 32), mat(baseColor)); drum.position.set(cx, h + 0.7, cz); drum.castShadow = true; g.add(drum);
-      const dome = new THREE.Mesh(new THREE.SphereGeometry(5.2, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), domeM); dome.position.set(cx, h + 1.4, cz); dome.castShadow = true; g.add(dome);
-      const mn = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.1, 16, 16), mat(0xF4EBDD)); mn.position.set(x1 - 1.5, 8, z0 + 1.5); mn.castShadow = true; g.add(mn);
-      const mt = new THREE.Mesh(new THREE.ConeGeometry(1.2, 2.6, 16), domeM); mt.position.set(x1 - 1.5, 17.3, z0 + 1.5); g.add(mt);
-      topY = h + 7.4;
-    }
-  }
-
-  g.traverse(o => { if (o.isMesh) { o.userData.id = id; pickables.push(o); } });
-  const lab = makeLabel(name, (area >= 100 ? area.toLocaleString('id-ID') : area) + ' m²');
-  lab.position.set(cx, topY, cz); g.add(lab);
-  site.add(g);
-  byId[id] = { group: g, name, zone, floors, area, desc };
+meta.forEach(it => {
+  byId[it.id] = it;
+  if (!it.label) return;
+  const l = makeLabel(it.name, it.area.toLocaleString('id-ID') + ' m²');
+  l.position.fromArray(it.label); view.add(l);
 });
+const gl = makeLabel('Gerbang Utama'); gl.position.fromArray(gateLabel); view.add(gl);
 
 // Tabel
 const rows = document.getElementById('rows');
-ITEMS.filter(i => i[7] > 0).forEach(([id, name, zone, , , , , floors, area]) => {
-  const tr = document.createElement('tr'); tr.dataset.id = id;
-  tr.innerHTML = `<td><span class="sw" style="background:var(--${zone});margin-right:8px;vertical-align:-2px"></span>${name}</td><td class="num">${floors}</td><td class="num">${area}</td>`;
-  tr.addEventListener('click', () => select(id, true));
+meta.filter(i => i.floors > 0).forEach(it => {
+  const tr = document.createElement('tr'); tr.dataset.id = it.id;
+  tr.innerHTML = `<td><span class="sw" style="background:var(--${it.zone});margin-right:8px;vertical-align:-2px"></span>${it.name}</td><td class="num">${it.floors}</td><td class="num">${it.area}</td>`;
+  tr.addEventListener('click', () => select(it.id, true));
   rows.appendChild(tr);
 });
 
-// Seleksi
+// Seleksi: sorot bangunan dengan emisif pada salinan material
 let selected = null;
-const emissive = new THREE.Color(0x553300);
+const originals = new Map();
 function select(id, focus) {
-  if (selected) byId[selected].group.traverse(o => { if (o.isMesh && o.material.emissive) o.material.emissive.setHex(0); });
+  originals.forEach((mat, mesh) => { mesh.material = mat; });
+  originals.clear();
   document.querySelectorAll('tr.active').forEach(t => t.classList.remove('active'));
   selected = id;
   if (!id) return;
   const it = byId[id];
-  it.group.traverse(o => { if (o.isMesh && o.material.emissive) { o.material = o.material.clone(); o.material.emissive.copy(emissive); } });
+  const box = new THREE.Box3();
+  pickables.forEach(mesh => {
+    if (mesh.userData.id !== id) return;
+    originals.set(mesh, mesh.material);
+    const mt = mesh.material.clone(); mt.emissive = new THREE.Color(0x4a2a00); mesh.material = mt;
+    if (mesh.visible && mesh.parent.visible) box.expandByObject(mesh);
+  });
   document.querySelector(`tr[data-id="${id}"]`)?.classList.add('active');
   document.getElementById('info-name').textContent = it.name;
   document.getElementById('info-meta').textContent =
-    `${ZONE[it.zone]} · ${it.area.toLocaleString('id-ID')} m²` + (it.floors ? ` · ${it.floors} lantai` : ' · sarana luar');
+    `${ZONE_NAMES[it.zone]} · ${it.area.toLocaleString('id-ID')} m²` + (it.floors ? ` · ${it.floors} lantai` : ' · sarana luar');
   document.getElementById('info-desc').textContent = it.desc;
-  if (focus) {
-    const c = new THREE.Box3().setFromObject(it.group).getCenter(new THREE.Vector3());
+  if (focus && !box.isEmpty()) {
+    const c = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3()).length();
+    const dir = camera.position.clone().sub(controls.target).normalize();
     controls.target.copy(c);
+    camera.position.copy(c).addScaledVector(dir, Math.max(size * 1.1, 14));
   }
 }
 const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
@@ -350,39 +290,46 @@ renderer.domElement.addEventListener('pointerup', e => {
   const r = renderer.domElement.getBoundingClientRect();
   ptr.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
   ray.setFromCamera(ptr, camera);
-  const hit = ray.intersectObjects(pickables, false)[0];
+  const hit = ray.intersectObjects(pickables.filter(p => p.parent.visible), false)[0];
   select(hit ? hit.object.userData.id : null, false);
 });
 
-// Kamera
+// Mode tampilan
+const modeBtns = { out: 'mode-out', 1: 'mode-1', 2: 'mode-2' };
+function setMode(mode) {
+  roofs.forEach(r => { r.visible = mode === 'out'; });
+  upper.forEach(u => { u.visible = mode !== 1; });
+  stage.classList.toggle('hide-labels', mode !== 'out' || labelsOff);
+  for (const [k, id] of Object.entries(modeBtns)) document.getElementById(id).setAttribute('aria-pressed', String(k) === String(mode));
+}
+let labelsOff = false;
+document.getElementById('mode-out').onclick = () => setMode('out');
+document.getElementById('mode-1').onclick = () => setMode(1);
+document.getElementById('mode-2').onclick = () => setMode(2);
 function setView(kind) {
-  if (kind === 'top') { camera.position.set(0, 150, 0.01); controls.target.set(0, 0, 0); }
+  if (kind === 'top') { camera.position.set(0, 140, 0.01); controls.target.set(0, 0, 0); }
   else { camera.position.set(35, 75, 115); controls.target.set(0, 0, 2); }
-  document.getElementById('btn-3d').setAttribute('aria-pressed', kind !== 'top');
-  document.getElementById('btn-top').setAttribute('aria-pressed', kind === 'top');
 }
 setView('3d');
 document.getElementById('btn-3d').onclick = () => setView('3d');
 document.getElementById('btn-top').onclick = () => setView('top');
 document.getElementById('btn-labels').onclick = e => {
-  const on = stage.classList.toggle('hide-labels');
-  e.currentTarget.setAttribute('aria-pressed', !on);
+  labelsOff = !labelsOff;
+  stage.classList.toggle('hide-labels', labelsOff);
+  e.currentTarget.setAttribute('aria-pressed', String(!labelsOff));
 };
 document.getElementById('btn-rotate').onclick = e => {
   controls.autoRotate = !controls.autoRotate;
-  e.currentTarget.setAttribute('aria-pressed', controls.autoRotate);
+  e.currentTarget.setAttribute('aria-pressed', String(controls.autoRotate));
 };
-
-// Ekspor GLB
-document.getElementById('btn-glb').onclick = () => {
-  select(null);
-  new GLTFExporter().parse(site, buf => {
-    const url = URL.createObjectURL(new Blob([buf], { type: 'model/gltf-binary' }));
-    const a = document.createElement('a'); a.href = url; a.download = 'pesantren-merah-putih-tapak.glb';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
-  }, err => console.error(err), { binary: true });
+document.getElementById('btn-glb').onclick = async () => {
+  const glb = await new GLTFExporter().parseAsync(site, { binary: true });
+  const url = URL.createObjectURL(new Blob([glb], { type: 'model/gltf-binary' }));
+  const a = document.createElement('a'); a.href = url; a.download = 'pesantren-merah-putih.glb';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
 };
+document.getElementById('hint').textContent = 'Seret untuk memutar · scroll/cubit untuk zoom · klik bangunan untuk detail';
 
 function resize() {
   const { clientWidth: w, clientHeight: h } = host;
@@ -391,7 +338,6 @@ function resize() {
 }
 new ResizeObserver(resize).observe(host);
 resize();
-
 renderer.setAnimationLoop(() => {
   controls.update();
   renderer.render(scene, camera);
