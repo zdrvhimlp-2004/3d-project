@@ -93,6 +93,13 @@ function wall(p, x0, z0, x1, z1, y, h, t, mat, ops = []) {
   const L = alongX ? x1 - x0 : z1 - z0;
   const place = (s, yy, w, hh, mt, th) => alongX ? bx(p, x0 + s, yy, z0, w, hh, th, mt) : bx(p, x0, yy, z0 + s, th, hh, w, mt);
   const seg = (a, b, yy, hh) => { if (b - a > 0.02 && hh > 0.02) place((a + b) / 2, yy, b - a, hh, mat, t); };
+  // Daun pintu berengsel: grup 'Pintu' di titik engsel, daun memanjang ke arah dir sepanjang dinding.
+  const door = (hinge, dir, lw, hh) => {
+    const pv = grp(p, alongX ? x0 + hinge : x0, y, alongX ? z0 : z0 + hinge, 0, 'Pintu');
+    pv.userData.door = { axis: alongX ? 'x' : 'z', dir };
+    if (alongX) { bx(pv, dir * lw / 2, 0, 0, lw, hh, 0.05, M.door); bx(pv, dir * lw * 0.85, 1.0, 0, 0.05, 0.12, t + 0.08, M.steel); }
+    else { bx(pv, 0, 0, dir * lw / 2, 0.05, hh, lw, M.door); bx(pv, 0, 1.0, dir * lw * 0.85, t + 0.08, 0.12, 0.05, M.steel); }
+  };
   let cur = 0;
   [...ops].sort((a, b) => a.at - b.at).forEach(o => {
     const kind = o.kind || 'door';
@@ -102,11 +109,8 @@ function wall(p, x0, z0, x1, z1, y, h, t, mat, ops = []) {
     const a = o.at - w / 2, b = o.at + w / 2;
     seg(cur, a, y, h); seg(a, b, y, y0); seg(a, b, y + y0 + oh, h - y0 - oh);
     if (kind === 'win') { place(o.at, y + y0, w, oh, M.glass, 0.04); place(o.at, y + y0 - 0.05, w + 0.1, 0.05, M.white, t + 0.08); }
-    if (kind === 'door') { place(o.at, y, w - 0.04, oh - 0.02, M.door, 0.05); place(o.at + w * 0.35, y + 1.0, 0.05, 0.12, M.steel, t + 0.08); }
-    if (kind === 'door2') {
-      place(o.at - w / 4, y, w / 2 - 0.03, oh - 0.02, M.door, 0.05); place(o.at + w / 4, y, w / 2 - 0.03, oh - 0.02, M.door, 0.05);
-      place(o.at - 0.08, y + 1.0, 0.05, 0.14, M.steel, t + 0.08); place(o.at + 0.08, y + 1.0, 0.05, 0.14, M.steel, t + 0.08);
-    }
+    if (kind === 'door') door(a + 0.02, 1, w - 0.04, oh - 0.02);
+    if (kind === 'door2') { door(a + 0.015, 1, w / 2 - 0.03, oh - 0.02); door(b - 0.015, -1, w / 2 - 0.03, oh - 0.02); }
     cur = b;
   });
   seg(cur, L, y, h);
@@ -628,7 +632,12 @@ export function buildSite() {
   label('gerbang', 30, 6.2, 0);
 
   // bangunan
-  const add = (spec, extra) => { const B = building(site, { ...spec, color: C[zoneOf[spec.id][2]], name: zoneOf[spec.id][1] }); return B; };
+  const footprints = [];
+  const add = spec => {
+    const [, name, zone] = zoneOf[spec.id];
+    footprints.push({ id: spec.id, name, zone, x0: spec.x0, z0: spec.z0, x1: spec.x1, z1: spec.z1, floors: spec.floors, h: spec.h ?? FLOOR_H });
+    return building(site, { ...spec, color: C[zone], name });
+  };
 
   const asrama = add({ id: 'asrama', x0: 2, z0: 19, x1: 20, z1: 79.3, floors: 2, hole: [5, 26.3, 10.8, 27.7],
     ops: [{ side: 'N', at: 16.9, kind: 'door' }, { side: 'S', at: 16.9, kind: 'door' }, { side: 'E', at: 9.25, kind: 'door2' }] });
@@ -639,6 +648,9 @@ export function buildSite() {
   const wudhu = building(site, { id: 'masjid', name: 'Ruang Wudhu', x0: 38.5, z0: 39, x1: 44.2, z1: 47.2, floors: 1, h: 3.4, roof: 'flat', skip: ['W'], color: C.ibadah,
     ops: [{ side: 'N', at: 3.5, kind: 'door' }, { side: 'S', at: 3.5, kind: 'door' }] });
   wudhu.g.userData.id = 'masjid';
+  footprints.push({ id: 'masjid', name: 'Ruang Wudhu & Serambi', zone: 'ibadah', x0: 38.5, z0: 25.1, x1: 44.2, z1: 47.2, floors: 1, h: 3.4 });
+  footprints.push({ id: 'parkir', name: 'Parkir & RTH', zone: 'luar', x0: 2, z0: 2, x1: 22.6, z1: 14.1, floors: 0, h: FLOOR_H });
+  footprints.push({ id: 'lapangan', name: 'Lapangan Serbaguna', zone: 'luar', x0: 7.8, z0: 82.4, x1: 52.3, z1: 98.5, floors: 0, h: FLOOR_H });
   const mTop = fillMasjid(hall, wudhu, hall.g); label('masjid', 30.8, mTop + 1, 36.15);
 
   const dapur = add({ id: 'dapur', x0: 23.1, z0: 50.3, x1: 44.2, z1: 78.3, floors: 1, h: 4.0,
@@ -729,5 +741,5 @@ export function buildSite() {
   for (const [x, z] of [[22.6, 31], [22.6, 62], [25.5, 49.5], [37.5, 23.6], [46.8, 33], [46.8, 70], [8.5, 81], [51, 81], [43.7, 12.6]]) trashSet(ls, x, z, x > 44 ? -Math.PI / 2 : x < 23 && z < 70 ? Math.PI / 2 : 0);
 
   const meta = ITEMS.map(([id, name, zone, floors, area, desc]) => ({ id, name, zone, floors, area, desc, label: labels[id]?.pos }));
-  return { site, meta, gateLabel: labels.gerbang.pos };
+  return { site, meta, footprints, gateLabel: labels.gerbang.pos };
 }

@@ -2,7 +2,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta charset="utf-8">
 <style>
-  /* Layout: kanvas 3D memenuhi 100% lebar × 100% tinggi layar, kontrol melayang di atasnya */
+  /* Layout: kanvas 3D memenuhi 100% layar; toolbar melayang di atas, HUD FPS di atas kanvas */
   :root {
     --scene: #EFE6DA;
     --chip: rgba(255, 255, 255, .92);
@@ -10,47 +10,129 @@
     --chip-on: #231A17;
     --chip-on-fg: #FBF7F1;
     --line: #E6DCD0;
+    --accent: #C8102E;
+    --hud: rgba(20, 14, 12, .62);
     --font: "Plus Jakarta Sans", "Segoe UI", Roboto, sans-serif;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) { --scene: #241B18; --chip: rgba(33, 25, 22, .92); --chip-fg: #F3EAE2; --chip-on: #F3EAE2; --chip-on-fg: #17110F; --line: #3A2D28; color-scheme: dark; }
   }
   :root[data-theme="dark"] { --scene: #241B18; --chip: rgba(33, 25, 22, .92); --chip-fg: #F3EAE2; --chip-on: #F3EAE2; --chip-on-fg: #17110F; --line: #3A2D28; color-scheme: dark; }
-  html, body { height: 100%; margin: 0; overflow: hidden; }
-  body { background: var(--scene); font-family: var(--font); }
-  #scene { position: fixed; inset: 0; width: 100%; height: 100%; cursor: zoom-in; }
+  html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; }
+  body { background: var(--scene); font-family: var(--font); -webkit-user-select: none; user-select: none; }
+  #scene { position: fixed; inset: 0; cursor: zoom-in; }
   #scene.full { cursor: grab; }
+  body.fps #scene { cursor: crosshair; }
   #scene canvas { display: block; width: 100%; height: 100%; touch-action: none; }
-  .bar { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 12px); left: 12px; right: 12px; display: flex; flex-wrap: wrap; gap: 6px; pointer-events: none; z-index: 2; }
-  .bar button {
+
+  .bar { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 12px); left: 12px; right: 12px; display: flex; flex-wrap: wrap; gap: 6px; pointer-events: none; z-index: 3; }
+  button {
     pointer-events: auto; font: 500 13px var(--font); color: var(--chip-fg); background: var(--chip);
     border: 1px solid var(--line); border-radius: 999px; padding: 6px 13px; cursor: pointer;
   }
-  .bar button[aria-pressed="true"] { background: var(--chip-on); color: var(--chip-on-fg); border-color: var(--chip-on); }
-  .bar button:focus-visible { outline: 2px solid #C8102E; outline-offset: 2px; }
+  button[aria-pressed="true"] { background: var(--chip-on); color: var(--chip-on-fg); border-color: var(--chip-on); }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #btn-fps { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 700; }
+  body.fps .orbit-only, body:not(.fps) .fps-only { display: none; }
+
   .hint {
     position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + 14px); transform: translateX(-50%);
     font: 500 13px var(--font); color: var(--chip-fg); background: var(--chip); border: 1px solid var(--line);
-    padding: 6px 14px; border-radius: 999px; pointer-events: none; white-space: nowrap; z-index: 2;
+    padding: 6px 14px; border-radius: 999px; pointer-events: none; white-space: nowrap; z-index: 2; max-width: calc(100vw - 32px); overflow: hidden; text-overflow: ellipsis;
   }
+  body.fps .hint { display: none; }
   .label {
     font: 700 12px/1.2 var(--font); color: #fff; text-align: center; background: rgba(28, 16, 14, .78);
     padding: 4px 8px; border-radius: 6px; white-space: nowrap; pointer-events: none;
   }
   .label small { display: block; font-weight: 400; opacity: .85; }
   .hide-labels .label { display: none; }
+
+  /* HUD FPS */
+  #fps-hud { position: fixed; inset: 0; pointer-events: none; z-index: 2; color: #fff; }
+  .crosshair { position: absolute; left: 50%; top: 50%; width: 18px; height: 18px; transform: translate(-50%, -50%); }
+  .crosshair::before, .crosshair::after { content: ""; position: absolute; background: rgba(255, 255, 255, .9); box-shadow: 0 0 2px rgba(0, 0, 0, .7); }
+  .crosshair::before { left: 8px; top: 0; width: 2px; height: 18px; }
+  .crosshair::after { top: 8px; left: 0; height: 2px; width: 18px; }
+  .loc {
+    position: absolute; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 58px); transform: translateX(-50%);
+    background: var(--hud); padding: 5px 14px; border-radius: 999px; font: 700 13px var(--font); white-space: nowrap;
+  }
+  #minimap {
+    position: absolute; right: 12px; top: calc(env(safe-area-inset-top, 0px) + 58px); width: 120px; height: 200px;
+    border-radius: 8px; box-shadow: 0 2px 10px rgba(0, 0, 0, .35); pointer-events: auto; cursor: pointer;
+  }
+  .map-cap { position: absolute; right: 12px; top: calc(env(safe-area-inset-top, 0px) + 262px); width: 120px; text-align: center; font: 500 11px var(--font); color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, .8); }
+  .prompt {
+    position: absolute; left: 50%; top: calc(50% + 34px); transform: translateX(-50%);
+    background: var(--hud); padding: 6px 14px; border-radius: 8px; font: 700 14px var(--font); white-space: nowrap;
+  }
+  .help {
+    position: absolute; left: 12px; bottom: calc(env(safe-area-inset-bottom, 0px) + 12px); max-width: min(560px, calc(100vw - 160px));
+    background: var(--hud); padding: 7px 12px; border-radius: 8px; font: 500 12px/1.5 var(--font);
+  }
+  .help kbd { font: 700 11px var(--font); background: rgba(255, 255, 255, .18); padding: 1px 5px; border-radius: 4px; }
+  .paused {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, calc(-50% - 60px));
+    background: var(--hud); padding: 10px 18px; border-radius: 10px; font: 700 15px var(--font);
+  }
+  .joy, .actbtns { display: none; }
+  #fps-hud.touch .help { display: none; }
+  #fps-hud.touch .joy {
+    display: block; position: absolute; left: calc(env(safe-area-inset-left, 0px) + 22px); bottom: calc(env(safe-area-inset-bottom, 0px) + 26px);
+    width: 96px; height: 96px; border-radius: 50%; background: rgba(255, 255, 255, .18); border: 2px solid rgba(255, 255, 255, .5);
+    pointer-events: auto; touch-action: none;
+  }
+  #joy-knob {
+    position: absolute; left: 50%; top: 50%; width: 42px; height: 42px; margin: -21px 0 0 -21px; border-radius: 50%;
+    background: rgba(255, 255, 255, .85); box-shadow: 0 2px 6px rgba(0, 0, 0, .35); pointer-events: none;
+  }
+  #fps-hud.touch .actbtns {
+    display: flex; flex-direction: column; gap: 12px; position: absolute;
+    right: calc(env(safe-area-inset-right, 0px) + 20px); bottom: calc(env(safe-area-inset-bottom, 0px) + 26px);
+  }
+  .actbtns button {
+    width: 68px; height: 68px; border-radius: 50%; padding: 0; font: 700 13px var(--font); touch-action: none;
+    background: rgba(255, 255, 255, .85); color: #231A17; border: 2px solid rgba(255, 255, 255, .9);
+  }
+  .actbtns #btn-jump { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .actbtns button:disabled { opacity: .35; }
+  @media (max-width: 520px) { #minimap { width: 90px; height: 150px; } .map-cap { width: 90px; top: calc(env(safe-area-inset-top, 0px) + 212px); } }
+  /* HP landscape: peta lebih kecil, tombol aksi berjajar agar tidak bertumpuk */
+  @media (max-height: 520px) {
+    #minimap { width: 66px; height: 110px; } .map-cap { display: none; }
+    #fps-hud.touch .actbtns { flex-direction: row; align-items: flex-end; }
+    .loc { top: calc(env(safe-area-inset-top, 0px) + 54px); }
+  }
 </style>
 
 <div id="scene"></div>
 <div class="bar">
-  <button id="mode-out" aria-pressed="true">Tampak Luar</button>
-  <button id="mode-1" aria-pressed="false">Interior Lt.1</button>
-  <button id="mode-2" aria-pressed="false">Interior Lt.2</button>
-  <button id="btn-top">Tampak Atas</button>
-  <button id="btn-3d">Perspektif</button>
+  <button id="btn-fps" class="orbit-only">Mode FPS</button>
+  <button id="mode-out" class="orbit-only" aria-pressed="true">Tampak Luar</button>
+  <button id="mode-1" class="orbit-only" aria-pressed="false">Interior Lt.1</button>
+  <button id="mode-2" class="orbit-only" aria-pressed="false">Interior Lt.2</button>
+  <button id="btn-top" class="orbit-only">Tampak Atas</button>
+  <button id="btn-3d" class="orbit-only">Perspektif</button>
+  <button id="btn-exit-fps" class="fps-only">Keluar FPS</button>
+  <button id="btn-cam" class="fps-only">Kamera: Orang Pertama</button>
+  <button id="btn-flash" class="fps-only" aria-pressed="false">Senter</button>
+  <button id="btn-night" aria-pressed="false">Malam</button>
   <button id="btn-full">Layar Penuh</button>
 </div>
 <div class="hint" id="hint">Memuat model…</div>
+
+<div id="fps-hud" hidden>
+  <div class="crosshair"></div>
+  <div class="loc" id="fps-loc">Halaman pesantren</div>
+  <canvas id="minimap" aria-label="Minimap, klik untuk berpindah tempat"></canvas>
+  <div class="map-cap">Ketuk peta untuk pindah</div>
+  <div class="prompt" id="fps-prompt" hidden></div>
+  <div class="help"><kbd>W A S D</kbd> gerak · <kbd>Shift</kbd> lari · <kbd>Spasi</kbd> lompat · <kbd>E</kbd>/klik pintu · <kbd>V</kbd> kamera · <kbd>F</kbd> senter · <kbd>N</kbd> malam · <kbd>Esc</kbd> lepas mouse</div>
+  <div class="paused" id="fps-paused" hidden>Klik untuk melihat sekeliling</div>
+  <div class="joy" id="joy"><div id="joy-knob"></div></div>
+  <div class="actbtns"><button id="btn-door" disabled>Buka</button><button id="btn-jump">Lompat</button></div>
+</div>
 
 <script type="importmap">
 { "imports": {
@@ -62,8 +144,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { buildSite, SITE_W, SITE_D } from './model.js';
+import { buildSite, SITE_W, SITE_D, ZONE_COLORS } from './model.js';
+import { buildView, buildColliders, createFPS } from './fps.js';
 
 const host = document.getElementById('scene');
 const hint = document.getElementById('hint');
@@ -78,11 +160,6 @@ labelRenderer.domElement.style.cssText = 'position:absolute;inset:0;pointer-even
 host.appendChild(labelRenderer.domElement);
 
 const scene = new THREE.Scene();
-const applyThemeBg = () => { scene.background = new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue('--scene').trim()); };
-applyThemeBg();
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyThemeBg);
-new MutationObserver(applyThemeBg).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-
 const camera = new THREE.PerspectiveCamera(40, 1, 0.2, 1000);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
@@ -90,7 +167,8 @@ controls.maxPolarAngle = Math.PI / 2 - 0.03;
 controls.minDistance = 3;
 controls.maxDistance = 260;
 
-scene.add(new THREE.HemisphereLight(0xfff6ea, 0x8a7a6a, 1.1));
+const hemi = new THREE.HemisphereLight(0xfff6ea, 0x8a7a6a, 1.1);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffffff, 1.5);
 sun.position.set(-40, 80, -30);
 sun.castShadow = true;
@@ -102,38 +180,11 @@ const outer = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshSt
 outer.rotation.x = -Math.PI / 2; outer.position.y = -0.06; outer.receiveShadow = true;
 scene.add(outer);
 
-// Gabungkan mesh per material agar ringan dirender layar penuh.
-function mergeGroup(g) {
-  g.updateMatrixWorld(true);
-  const inv = g.matrixWorld.clone().invert(), buckets = new Map();
-  g.traverse(o => {
-    if (!o.isMesh) return;
-    const geo = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
-    geo.deleteAttribute('uv');
-    geo.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld));
-    if (!buckets.has(o.material)) buckets.set(o.material, []);
-    buckets.get(o.material).push(geo);
-  });
-  const out = new THREE.Group();
-  out.position.copy(g.position); out.rotation.copy(g.rotation); out.userData = { ...g.userData };
-  for (const [mat, geos] of buckets) {
-    const mesh = new THREE.Mesh(mergeGeometries(geos), mat);
-    mesh.castShadow = !mat.transparent; mesh.receiveShadow = true;
-    out.add(mesh);
-  }
-  return out;
-}
-function viewCopy(src) {
-  if (src.userData.merge) return mergeGroup(src);
-  const c = new THREE.Group();
-  c.position.copy(src.position); c.rotation.copy(src.rotation); c.userData = { ...src.userData };
-  src.children.forEach(ch => c.add(viewCopy(ch)));
-  return c;
-}
-const { site, meta, gateLabel } = buildSite();
+const { site, meta, footprints, gateLabel } = buildSite();
 site.position.set(-SITE_W / 2, 0, -SITE_D / 2);
-const view = viewCopy(site);
+const { view, doors } = buildView(site);
 scene.add(view);
+const grid = buildColliders(site);
 
 const roofs = [], upper = [];
 view.traverse(o => {
@@ -149,8 +200,50 @@ function makeLabel(title, sub) {
 meta.forEach(it => { if (it.label) { const l = makeLabel(it.name, it.area.toLocaleString('id-ID') + ' m²'); l.position.fromArray(it.label); view.add(l); } });
 const gl = makeLabel('Gerbang Utama'); gl.position.fromArray(gateLabel); view.add(gl);
 
-// Mode & kamera
+// ---------- siang / malam ----------
+// Lampu taman jadi sumber cahaya nyata di malam hari: 6 lampu titik dipindah ke tiang terdekat.
+const lampSpots = [];
+site.updateMatrixWorld(true);
+site.traverse(o => { if (o.name === 'Lampu Taman') lampSpots.push(o.getWorldPosition(new THREE.Vector3()).setY(3.4)); });
+const lampMats = new Set(), glassMats = new Set();
+view.traverse(o => {
+  if (!o.isMesh) return;
+  if (o.material.emissive && o.material.emissive.getHex() !== 0) lampMats.add(o.material);
+  if (o.material.transparent && o.material.opacity < 0.5) glassMats.add(o.material);
+});
+const pool = Array.from({ length: 6 }, () => { const l = new THREE.PointLight(0xffd99a, 0, 16, 1.6); scene.add(l); return l; });
+let night = false;
+const DAY_BG = () => new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue('--scene').trim());
+function applySky() { scene.background = night ? new THREE.Color(0x0E1424) : DAY_BG(); }
+function setNight(on) {
+  night = on;
+  hemi.intensity = on ? 0.22 : 1.1;
+  hemi.color.set(on ? 0x8796c8 : 0xfff6ea);
+  sun.intensity = on ? 0.18 : 1.5;
+  sun.color.set(on ? 0x9fb4ff : 0xffffff);
+  outer.material.color.set(on ? 0x5a5448 : 0xCFC3AE);
+  lampMats.forEach(m => { m.emissiveIntensity = on ? 3 : 0.8; });
+  glassMats.forEach(m => { m.emissive = new THREE.Color(on ? 0xFFC874 : 0x000000); m.emissiveIntensity = on ? 0.7 : 0; m.opacity = on ? 0.7 : 0.35; });
+  pool.forEach(l => { l.intensity = on ? 18 : 0; });
+  applySky();
+  document.getElementById('btn-night').setAttribute('aria-pressed', String(on));
+  document.getElementById('btn-night').textContent = on ? 'Siang' : 'Malam';
+}
+function placeLamps(center) {
+  if (!night) return;
+  lampSpots.slice().sort((a, b) => a.distanceToSquared(center) - b.distanceToSquared(center))
+    .slice(0, pool.length).forEach((p, i) => pool[i].position.copy(p));
+}
+document.getElementById('btn-night').onclick = () => setNight(!night);
+addEventListener('keydown', e => { if (e.code === 'KeyN' && !e.repeat) setNight(!night); });
+applySky();
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applySky);
+new MutationObserver(applySky).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+// ---------- mode orbit ----------
+let currentMode = 'out';
 function setMode(mode) {
+  currentMode = mode;
   roofs.forEach(r => { r.visible = mode === 'out'; });
   upper.forEach(u => { u.visible = mode !== 1; });
   host.classList.toggle('hide-labels', mode !== 'out');
@@ -167,7 +260,30 @@ document.getElementById('btn-top').onclick = () => setView('top');
 document.getElementById('btn-3d').onclick = () => setView('3d');
 setView('3d');
 
-// Layar penuh: klik kanvas (tanpa menyeret) langsung masuk layar penuh.
+// ---------- mode FPS ----------
+const fps = createFPS({
+  scene, renderer, grid, doors, footprints, zoneColors: ZONE_COLORS,
+  offset: new THREE.Vector3(-SITE_W / 2, 0, -SITE_D / 2),
+  onExit: () => {
+    document.body.classList.remove('fps');
+    controls.enabled = true;
+    labelRenderer.domElement.hidden = false;
+    const p = fps.position;
+    controls.target.set(p.x, 0, p.z);
+    camera.position.set(p.x + 25, 30, p.z + 35);
+    syncFull();
+  },
+});
+document.getElementById('btn-fps').onclick = () => {
+  setMode('out');
+  document.body.classList.add('fps');
+  controls.enabled = false;
+  labelRenderer.domElement.hidden = true;
+  if (!isFull()) enterFull();
+  fps.enter();
+};
+
+// ---------- layar penuh ----------
 const isFull = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
 async function enterFull() {
   const el = document.documentElement;
@@ -176,7 +292,7 @@ async function enterFull() {
     else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
     else throw new Error('unsupported');
   } catch {
-    hint.textContent = 'Layar penuh tidak didukung di tampilan ini. Buka fullscreen.html langsung di browser.';
+    if (!fps.active) hint.textContent = 'Layar penuh tidak didukung di tampilan ini. Buka fullscreen.html langsung di browser.';
   }
 }
 function exitFull() {
@@ -187,7 +303,7 @@ function syncFull() {
   const on = isFull();
   host.classList.toggle('full', on);
   document.getElementById('btn-full').textContent = on ? 'Keluar Layar Penuh' : 'Layar Penuh';
-  hint.textContent = on ? 'Seret untuk memutar · scroll/cubit untuk zoom · Esc untuk keluar' : 'Klik model untuk layar penuh';
+  hint.textContent = on ? 'Seret untuk memutar · scroll/cubit untuk zoom · Esc untuk keluar' : 'Klik model untuk layar penuh · coba “Mode FPS”';
 }
 document.addEventListener('fullscreenchange', syncFull);
 document.addEventListener('webkitfullscreenchange', syncFull);
@@ -198,7 +314,7 @@ renderer.domElement.addEventListener('pointerdown', e => { downAt = [e.clientX, 
 renderer.domElement.addEventListener('pointerup', e => {
   const moved = !downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5;
   downAt = null;
-  if (!moved && !isFull()) enterFull();
+  if (!moved && !isFull() && !fps.active) enterFull();
 });
 syncFull();
 
@@ -206,12 +322,24 @@ function resize() {
   const w = innerWidth, h = innerHeight;
   renderer.setSize(w, h); labelRenderer.setSize(w, h);
   camera.aspect = w / h; camera.updateProjectionMatrix();
+  fps.setAspect(w / h);
 }
 addEventListener('resize', resize);
 resize();
+
+const clock = new THREE.Clock();
+let lampT = 0;
 renderer.setAnimationLoop(() => {
-  controls.update();
-  renderer.render(scene, camera);
-  labelRenderer.render(scene, camera);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  fps.update(dt);
+  lampT -= dt;
+  if (lampT <= 0) { lampT = 0.3; placeLamps(fps.active ? fps.position : controls.target); }
+  if (fps.active) {
+    renderer.render(scene, fps.camera);
+  } else {
+    controls.update();
+    renderer.render(scene, camera);
+    labelRenderer.render(scene, camera);
+  }
 });
 </script>
