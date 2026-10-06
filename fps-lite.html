@@ -1,0 +1,388 @@
+<title>Pesantren FPS Ringan</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta charset="utf-8">
+<style>
+  /* Versi ringan: satu kanvas penuh layar, HUD minimal. Tampilan tetap gelap/terang mengikuti dunia 3D, bukan tema. */
+  :root { --hud: rgba(20, 14, 12, .6); --accent: #C8102E; color-scheme: light; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; }
+  body { background: #DCE6EE; font: 500 13px system-ui, "Segoe UI", Roboto, sans-serif; color: #fff; -webkit-user-select: none; user-select: none; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  .x { position: fixed; left: 50%; top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px; pointer-events: none; }
+  .x::before, .x::after { content: ""; position: absolute; background: #fff; box-shadow: 0 0 2px #000; }
+  .x::before { left: 7px; width: 2px; height: 16px; } .x::after { top: 7px; height: 2px; width: 16px; }
+  #prompt { position: fixed; left: 50%; top: calc(50% + 28px); transform: translateX(-50%); background: var(--hud); padding: 5px 12px; border-radius: 8px; font-weight: 700; pointer-events: none; white-space: nowrap; }
+  #help { position: fixed; left: 10px; bottom: calc(env(safe-area-inset-bottom, 0px) + 10px); background: var(--hud); padding: 6px 10px; border-radius: 8px; pointer-events: none; }
+  #start { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(15, 10, 8, .55); cursor: pointer; z-index: 3; }
+  #start div { background: var(--accent); padding: 14px 26px; border-radius: 999px; font-size: 17px; font-weight: 700; }
+  #joy { display: none; position: fixed; left: calc(env(safe-area-inset-left, 0px) + 20px); bottom: calc(env(safe-area-inset-bottom, 0px) + 22px); width: 92px; height: 92px; border-radius: 50%; background: rgba(255, 255, 255, .2); border: 2px solid rgba(255, 255, 255, .55); touch-action: none; }
+  #knob { position: absolute; left: 25px; top: 25px; width: 42px; height: 42px; border-radius: 50%; background: rgba(255, 255, 255, .9); pointer-events: none; }
+  #acts { display: none; position: fixed; right: calc(env(safe-area-inset-right, 0px) + 18px); bottom: calc(env(safe-area-inset-bottom, 0px) + 22px); gap: 12px; align-items: flex-end; }
+  #acts button { width: 64px; height: 64px; border-radius: 50%; border: 2px solid #fff; background: rgba(255, 255, 255, .85); color: #231A17; font: 700 13px system-ui, sans-serif; touch-action: none; }
+  #acts #jump { background: var(--accent); color: #fff; border-color: var(--accent); }
+  #acts button:disabled { opacity: .35; }
+  body.touch #joy { display: block; } body.touch #acts { display: flex; } body.touch #help { display: none; }
+</style>
+
+<div class="x"></div>
+<div id="prompt" hidden></div>
+<div id="help">WASD jalan · Shift lari · Spasi lompat · E / klik buka pintu · Esc lepas mouse</div>
+<div id="joy"><div id="knob"></div></div>
+<div id="acts"><button id="door" disabled>Buka</button><button id="jump">Lompat</button></div>
+<div id="start"><div>Ketuk untuk mulai</div></div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js';
+
+// ================= DUNIA (koordinat tapak: x 0–60 barat→timur, z 0–100 utara→selatan) =================
+const OX = -30, OZ = -50;
+const COL = { santri: 0xC8102E, ibadah: 0xE0A100, layanan: 0xB34834, pengelola: 0x6F0A1C };
+const boxes = [];      // semua kotak: digambar dengan instancing
+const solids = [];     // kotak yang menghalangi pemain
+// x, z = pusat; y = alas
+function B(x, y, z, w, h, d, c, solid = true) {
+  boxes.push([x, y, z, w, h, d, c]);
+  if (solid) solids.push({ x0: x - w / 2 + OX, x1: x + w / 2 + OX, y0: y, y1: y + h, z0: z - d / 2 + OZ, z1: z + d / 2 + OZ });
+}
+const doorSpecs = [];  // [hingeX, hingeZ, axis, dir, width]
+
+// Dinding sejajar sumbu dengan bukaan pintu {at, w, leaf}
+function wall(x0, z0, x1, z1, H, c, ops = [], t = 0.2) {
+  const ax = z0 === z1, L = ax ? x1 - x0 : z1 - z0;
+  const seg = (a, b, y, h) => { if (b - a > 0.02 && h > 0.02) ax ? B(x0 + (a + b) / 2, y, z0, b - a, h, t, c) : B(x0, y, z0 + (a + b) / 2, t, h, b - a, c); };
+  let cur = 0;
+  ops.sort((p, q) => p.at - q.at).forEach(o => {
+    const w = o.w || 1, a = o.at - w / 2, b = o.at + w / 2;
+    seg(cur, a, 0, H); seg(a, b, 2.2, H - 2.2);
+    if (o.leaf !== false) {
+      const n = w > 1.4 ? 2 : 1, lw = w / n;
+      for (let i = 0; i < n; i++) {
+        const dir = i === 0 ? 1 : -1, s = i === 0 ? a : b;
+        doorSpecs.push([ax ? x0 + s : x0, ax ? z0 : z0 + s, ax ? 'x' : 'z', dir, lw - 0.02]);
+      }
+    }
+    cur = b;
+  });
+  seg(cur, L, 0, H);
+}
+// Bangunan: 4 dinding, jendela tempel, atap datar
+function building(x0, z0, x1, z1, H, c, ops = {}, skip = '') {
+  const sides = { N: [x0, z0, x1, z0], S: [x0, z1, x1, z1], W: [x0, z0, x0, z1], E: [x1, z0, x1, z1] };
+  for (const k in sides) {
+    if (skip.includes(k)) continue;
+    const o = (ops[k] || []).map(v => typeof v === 'number' ? { at: v } : v);
+    wall(...sides[k], H, c, o);
+    // jendela: panel kaca tempel di sisi luar, tidak menghalangi
+    const [a0, b0, a1, b1] = sides[k], ax = k === 'N' || k === 'S', L = ax ? a1 - a0 : b1 - b0;
+    const out = k === 'N' || k === 'W' ? -0.12 : 0.12;
+    for (let fl = 0; fl < Math.round(H / 3.6); fl++) for (let s = 2; s < L - 1.5; s += 3.2) {
+      if (o.some(p => Math.abs(p.at - s) < (p.w || 1) / 2 + 0.9)) continue;
+      ax ? B(a0 + s, 1 + fl * 3.6, b0 + out, 1.2, 1.2, 0.04, 0x33495A, false) : B(a0 + out, 1 + fl * 3.6, b0 + s, 0.04, 1.2, 1.2, 0x33495A, false);
+    }
+  }
+  B((x0 + x1) / 2, H, (z0 + z1) / 2, x1 - x0 + 0.6, 0.3, z1 - z0 + 0.6, new THREE.Color(c).multiplyScalar(0.75).getHex());
+}
+
+// tanah, jalan, lapangan
+B(30, -0.2, 50, 60, 0.2, 100, 0xE2D5BF);
+B(30, 0, 9.3, 12, 0.01, 18.6, 0x55585C, false);
+B(30, 0, 16.6, 56, 0.01, 4, 0x55585C, false);
+B(12.3, 0, 8, 20.6, 0.01, 12, 0x5D6064, false);
+for (let i = 0; i < 7; i++) B(3 + i * 2.7, 0.012, 4.6, 0.1, 0.01, 4.8, 0xF2F2EE, false);
+B(30, 0, 90.5, 44.5, 0.02, 16, 0x5F9450, false);
+B(30, 0.025, 90.5, 0.1, 0.01, 15, 0xFFFFFF, false);
+for (const gx of [8.6, 51.4]) { B(gx, 0, 89, 0.12, 2, 0.12, 0xFFFFFF); B(gx, 0, 92, 0.12, 2, 0.12, 0xFFFFFF); B(gx, 2, 90.5, 0.12, 0.12, 3.1, 0xFFFFFF); }
+for (const [x, w, d] of [[21.6, 2.6, 62], [45.7, 2.6, 62]]) B(x, 0, 50, w, 0.01, d, 0xC4BBAE, false);
+B(30, 0, 80.9, 56, 0.01, 2.6, 0xC4BBAE, false);
+B(33.6, 0, 21.8, 21, 0.01, 6.4, 0xC4BBAE, false);
+
+// pagar & gerbang
+const FC = 0xB89A6A;
+B(12.3, 0, 0, 24.6, 1.8, 0.3, FC); B(47.7, 0, 0, 24.6, 1.8, 0.3, FC);
+B(30, 0, 100, 60, 1.8, 0.3, FC); B(0, 0, 50, 0.3, 1.8, 100, FC); B(60, 0, 50, 0.3, 1.8, 100, FC);
+B(24.6, 0, 0, 0.9, 4.2, 0.9, 0xC8102E); B(35.4, 0, 0, 0.9, 4.2, 0.9, 0xC8102E); B(30, 4.2, 0, 11.7, 1, 0.9, 0xC8102E);
+
+// bangunan (pintu: angka = posisi dari ujung dinding; {at, w} untuk pintu ganda)
+building(2, 19, 20, 79.3, 7.2, COL.santri, { E: [{ at: 9.25, w: 1.8 }], N: [16.9], S: [16.9] });
+building(23.1, 25.1, 38.5, 47.2, 5, COL.ibadah, { E: [{ at: 2.9, w: 1.8 }, { at: 7.3, w: 1.8 }, { at: 11.7, w: 1.8 }, 16], S: [{ at: 4, w: 1.8 }] });
+building(38.5, 39, 44.2, 47.2, 3.4, COL.ibadah, { N: [3.5], S: [3.5] }, 'W');
+building(23.1, 50.3, 44.2, 78.3, 4, COL.layanan, { N: [{ at: 6, w: 1.8 }, { at: 15, w: 1.8 }], E: [{ at: 9.7, w: 1.8 }], W: [4.5], S: [1, { at: 17.9, w: 1.8 }] });
+building(47.2, 19.1, 58.2, 42.2, 3.6, COL.layanan, { N: [1], S: [1], W: [{ at: 11.5, w: 1.8 }] });
+building(47.2, 44.2, 58.2, 55.3, 3.6, COL.layanan, { W: [{ at: 2.6, w: 1.4 }] });
+building(47.2, 57.3, 58.2, 78.3, 7.2, COL.pengelola, { N: [0.9], S: [0.9], W: [10.5] });
+building(44.5, 2, 58.2, 14.1, 7.2, COL.pengelola, { W: [{ at: 3.5, w: 1.8 }], S: [2.5] });
+building(36.3, 1.5, 42.9, 10.7, 3.2, COL.pengelola, { W: [6.5] });
+building(2, 88.2, 6.4, 93.4, 3, COL.pengelola, { N: [2.2] });
+building(53.8, 88.2, 58.2, 93.4, 3, COL.pengelola, { N: [2.2] });
+
+// isi sederhana
+const IN = 0xEFE7DA;
+// asrama: koridor timur + 5 kamar berisi ranjang susun & loker
+wall(17.8, 19, 17.8, 79.3, 3.4, IN, [{ at: 9.25, w: 3, leaf: false }, ...[0, 1, 2, 3, 4].map(r => ({ at: 30.5 + r * 9.76 + 8.9 - 19, leaf: false }))], 0.12);
+for (const z of [26, 30.5, 40.26, 50.02, 59.78, 69.54]) wall(2, z, 17.8, z, 3.4, IN, [], 0.12);
+for (let r = 0; r < 5; r++) {
+  const s = 30.5 + r * 9.76;
+  for (let i = 0; i < 6; i++) for (const bxp of [3.15, 7.4]) {
+    B(bxp, 0, s + 1.05 + i * 1.45, 2, 1.7, 0.95, 0x8C939A); B(bxp, 1.7, s + 1.05 + i * 1.45, 1.9, 0.08, 0.9, i % 2 ? 0x2F5E8E : 0x7A2E3B, false);
+  }
+  for (let k = 0; k < 6; k++) B(10.7 + k * 1.05, 0, s + 0.4, 1, 1.8, 0.5, 0x5F7D8C);
+}
+// toilet asrama
+for (let i = 0; i < 7; i++) { B(2.3 + i * 1.3, 0, 19.9, 0.05, 2, 1.6, 0x7FB3C8); B(2.3 + i * 1.3, 0, 25.1, 0.05, 2, 1.6, 0x7FB3C8); }
+B(7.2, 0, 22.5, 8, 0.8, 0.6, 0x7FB3C8);
+// masjid: karpet, mihrab, tiang, rak, kubah & menara
+B(30.8, 0, 36.15, 15, 0.02, 21.6, 0x2C6A4E, false);
+for (let x = 25; x < 38; x += 1.2) B(x, 0.021, 36.15, 0.06, 0.005, 21.6, 0xE9E2C8, false);
+B(23.4, 0, 36.15, 0.4, 3, 2, 0xD9A92C);
+for (const [x, z] of [[26.6, 32], [35, 32], [26.6, 40.3], [35, 40.3]]) B(x, 0, z, 0.5, 5, 0.5, 0xF5F4F0);
+for (const x of [28, 31.5, 35]) { B(x, 0, 25.45, 3, 1.6, 0.35, 0x7B4B2A); B(x, 0, 46.85, 3, 1.6, 0.35, 0x7B4B2A); }
+B(41.35, 0, 32, 5.7, 0.05, 13.9, 0xE4DDD0, false);
+for (const z of [25.4, 29.9, 34.4, 38.8]) B(43.9, 0, z, 0.35, 4.2, 0.35, 0xF5F4F0);
+B(41.4, 4.2, 32, 6.2, 0.3, 14.2, 0xB38000);
+B(43.9, 4.5, 25.4, 1.6, 12, 1.6, 0xF5F4F0);
+// dapur: tikar makan lesehan + meja saji
+for (let k = 0; k < 6; k++) B(33.65, 0, 52.5 + k * 3, 18.3, 0.02, 1.6, 0x8E3B2E, false);
+wall(23.1, 70.3, 44.2, 70.3, 3.8, IN, [{ at: 9, leaf: false }, { at: 14, leaf: false }], 0.12);
+B(27.6, 0, 69.6, 4.2, 0.9, 0.7, 0xC7CCD1);
+for (let i = 0; i < 3; i++) B(26 + i * 2.7, 0, 77.8, 1.6, 0.9, 0.7, 0x9AA1A8);
+// ruang serbaguna: meja kelas
+for (let i = 0; i < 4; i++) for (let j = 0; j < 8; j++) B(50.8 + i * 1.6, 0, 21 + j * 2.6, 0.5, 0.75, 1.0, 0xA0703F);
+for (let j = 0; j < 4; j++) B(58, 0.9, 22 + j * 5.5, 0.05, 1.2, 2.4, 0xFFFFFF, false);
+// klinik, mess, kantor
+B(55, 0, 50, 0.9, 0.7, 2, 0xA8D0D8); B(57.2, 0, 50, 0.9, 0.7, 2, 0xA8D0D8);
+for (let r = 0; r < 6; r++) B(57, 0, 60 + r * 3, 2, 0.5, 0.95, 0x2F5E8E);
+for (let r = 0; r < 2; r++) for (let c = 0; c < 3; c++) B(51.5 + c * 2.4, 0, 5 + r * 4, 1.4, 0.75, 0.7, 0xA0703F);
+B(47.6, 0, 4.2, 0.6, 1.05, 1.8, 0x6A4528);
+
+// halaman: tiang bendera, mobil, tempat sampah, bangku
+B(30, 0, 21.3, 2, 0.4, 2, 0xB7B0A5); B(30, 0.4, 21.3, 0.12, 10, 0.12, 0xF5F4F0);
+B(30.8, 9.4, 21.3, 1.5, 0.5, 0.03, 0xC8102E, false); B(30.8, 8.9, 21.3, 1.5, 0.5, 0.03, 0xFFFFFF, false);
+[0xF2F2F2, 0x1F2A36, 0xA61B29, 0x8F9AA3, 0x2E5E8C].forEach((c, i) => {
+  B(4.35 + i * 2.7, 0.15, 4.6, 1.8, 0.85, 4.3, c); B(4.35 + i * 2.7, 1.0, 4.4, 1.6, 0.6, 2.2, 0x2C3B46);
+});
+B(45.7, 0.15, 50.3, 1.9, 2.3, 4.8, 0xFFFFFF);
+for (const [x, z] of [[22.6, 31], [22.6, 62], [25.5, 49.5], [37.5, 23.6], [46.8, 33], [46.8, 70], [8.5, 81], [51, 81]]) {
+  B(x - 0.6, 0, z, 0.45, 0.8, 0.45, 0x3E8E4E); B(x, 0, z, 0.45, 0.8, 0.45, 0xE5B620); B(x + 0.6, 0, z, 0.45, 0.8, 0.45, 0xC8102E);
+}
+for (const x of [14, 22, 38, 46]) B(x, 0, 81.9, 1.6, 0.5, 0.45, 0xA0703F);
+const trees = [[24, 19.5], [43.4, 23.2], [23.6, 80.5], [43.6, 80.5], [20.6, 3.5], [20.6, 8], [20.6, 12.5], [43.5, 15.6]];
+for (const [x, z] of trees) B(x, 0, z, 0.3, 2.4, 0.3, 0x6B4B33);
+
+// ================= RENDER =================
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.25));
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xDCE6EE);
+scene.fog = new THREE.Fog(0xDCE6EE, 45, 110);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x9a8a78, 1.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.3); sun.position.set(-3, 8, 4); scene.add(sun);
+const cam = new THREE.PerspectiveCamera(72, 1, 0.05, 140);
+cam.rotation.order = 'YXZ';
+
+// satu InstancedMesh per warna
+const unit = new THREE.BoxGeometry(1, 1, 1), mats = new Map(), m4 = new THREE.Matrix4(), q = new THREE.Quaternion();
+const mat = c => mats.get(c) || mats.set(c, new THREE.MeshLambertMaterial({ color: c })).get(c);
+const byColor = new Map();
+for (const b of boxes) (byColor.get(b[6]) || byColor.set(b[6], []).get(b[6])).push(b);
+for (const [c, list] of byColor) {
+  const im = new THREE.InstancedMesh(unit, mat(c), list.length);
+  list.forEach(([x, y, z, w, h, d], i) => im.setMatrixAt(i, m4.compose(new THREE.Vector3(x + OX, y + h / 2, z + OZ), q, new THREE.Vector3(w, h, d))));
+  scene.add(im);
+}
+// kubah, puncak menara, daun pohon
+const dome = new THREE.Mesh(new THREE.SphereGeometry(5.2, 20, 8, 0, Math.PI * 2, 0, Math.PI / 2), mat(0xD9A92C));
+dome.position.set(30.8 + OX, 5.3, 36.15 + OZ); scene.add(dome);
+const cone = new THREE.Mesh(new THREE.ConeGeometry(1.2, 2.6, 8), mat(0xD9A92C)); cone.position.set(43.9 + OX, 17.8, 25.4 + OZ); scene.add(cone);
+const leaves = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1.5, 0), mat(0x4E7D3A), trees.length);
+trees.forEach(([x, z], i) => leaves.setMatrixAt(i, m4.compose(new THREE.Vector3(x + OX, 3.1, z + OZ), q, new THREE.Vector3(1, 0.9, 1))));
+scene.add(leaves);
+
+// pintu berengsel
+const leafGeo = new THREE.BoxGeometry(1, 2.18, 0.05), doorMat = mat(0x7B4B2A);
+const doors = doorSpecs.map(([hx, hz, axis, dir, w]) => {
+  const pivot = new THREE.Group(); pivot.position.set(hx + OX, 0, hz + OZ);
+  const leaf = new THREE.Mesh(leafGeo, doorMat); leaf.scale.x = w;
+  if (axis === 'x') leaf.position.set(dir * w / 2, 1.09, 0); else { leaf.rotation.y = Math.PI / 2; leaf.position.set(0, 1.09, dir * w / 2); }
+  pivot.add(leaf); scene.add(pivot);
+  return { pivot, leaf, axis, dir, angle: 0, target: 0, box: { x0: 0, x1: 0, y0: 0, y1: 2.2, z0: 0, z1: 0 } };
+});
+const tmpBox = new THREE.Box3();
+function doorBox(d) {
+  tmpBox.setFromObject(d.leaf);
+  Object.assign(d.box, { x0: tmpBox.min.x, x1: tmpBox.max.x, z0: tmpBox.min.z, z1: tmpBox.max.z });
+}
+scene.updateMatrixWorld(true);
+doors.forEach(doorBox);
+
+// ================= FISIKA =================
+const CELL = 2, grid = new Map(), key = (x, z) => (x + 500) * 1000 + (z + 500);
+solids.forEach(b => {
+  for (let x = Math.floor(b.x0 / CELL); x <= Math.floor(b.x1 / CELL); x++)
+    for (let z = Math.floor(b.z0 / CELL); z <= Math.floor(b.z1 / CELL); z++) (grid.get(key(x, z)) || grid.set(key(x, z), []).get(key(x, z))).push(b);
+});
+const near = [], found = new Set();
+function query(x, z, r) {
+  near.length = 0; found.clear();
+  for (let gx = Math.floor((x - r) / CELL); gx <= Math.floor((x + r) / CELL); gx++)
+    for (let gz = Math.floor((z - r) / CELL); gz <= Math.floor((z + r) / CELL); gz++)
+      for (const b of grid.get(key(gx, gz)) || []) if (!found.has(b)) { found.add(b); near.push(b); }
+  for (const d of doors) if (Math.abs(d.pivot.position.x - x) < 3 && Math.abs(d.pivot.position.z - z) < 3) near.push(d.box);
+  return near;
+}
+const R = 0.3, HEIGHT = 1.75, EYE = 1.6, STEP = 0.35, GRAV = 22, JUMP = 7, WALK = 3.4, RUN = 6.5;
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const pos = new THREE.Vector3(30 + OX, 0, 6 + OZ), vel = new THREE.Vector3();
+let vy = 0, grounded = false, coyote = 0, yaw = Math.PI, pitch = 0, jumpReq = false, bob = 0;
+
+function pushOut() {
+  for (const b of query(pos.x, pos.z, R)) {
+    if (b.y1 <= pos.y + STEP || b.y0 >= pos.y + HEIGHT) continue;
+    const dx = pos.x - clamp(pos.x, b.x0, b.x1), dz = pos.z - clamp(pos.z, b.z0, b.z1), d2 = dx * dx + dz * dz;
+    if (d2 >= R * R) continue;
+    if (d2 > 1e-10) { const d = Math.sqrt(d2), k = (R - d) / d; pos.x += dx * k; pos.z += dz * k; }
+    else {
+      const o = [[b.x0 - R - pos.x, 0], [b.x1 + R - pos.x, 0], [0, b.z0 - R - pos.z], [0, b.z1 + R - pos.z]].sort((a, c) => Math.abs(a[0] + a[1]) - Math.abs(c[0] + c[1]))[0];
+      pos.x += o[0]; pos.z += o[1];
+    }
+  }
+}
+function under(b, r) { const dx = pos.x - clamp(pos.x, b.x0, b.x1), dz = pos.z - clamp(pos.z, b.z0, b.z1); return dx * dx + dz * dz < r * r; }
+function groundAt(maxY) { let g = 0; for (const b of query(pos.x, pos.z, R)) if (b.y1 <= maxY && b.y1 > g && under(b, R * 0.8)) g = b.y1; return g; }
+function ceilAt() { let c = 1e9; for (const b of query(pos.x, pos.z, R)) if (b.y0 >= pos.y + STEP && b.y0 < c && under(b, R * 0.9)) c = b.y0; return c; }
+function solidAt(x, y, z) {
+  for (const b of grid.get(key(Math.floor(x / CELL), Math.floor(z / CELL))) || []) if (x > b.x0 && x < b.x1 && y > b.y0 && y < b.y1 && z > b.z0 && z < b.z1) return true;
+  return false;
+}
+
+// ================= INPUT =================
+const keys = new Set(), joy = { id: null, x: 0, y: 0 };
+let look = null, locked = false, noLock = false, started = false;
+const touch = matchMedia('(pointer: coarse)').matches;
+if (touch) document.body.classList.add('touch');
+const canvas = renderer.domElement, $ = id => document.getElementById(id);
+
+addEventListener('keydown', e => {
+  if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
+  if (e.repeat) return;
+  keys.add(e.code);
+  if (e.code === 'Space') jumpReq = true;
+  if (e.code === 'KeyE') toggle(target);
+});
+addEventListener('keyup', e => keys.delete(e.code));
+addEventListener('blur', () => keys.clear());
+
+function lockMouse() {
+  if (touch || noLock) return;
+  try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => { noLock = true; }); } catch { noLock = true; }
+}
+document.addEventListener('pointerlockerror', () => { noLock = true; });
+document.addEventListener('pointerlockchange', () => { locked = document.pointerLockElement === canvas; });
+$('start').addEventListener('click', () => {
+  $('start').hidden = true; started = true;
+  const el = document.documentElement;
+  try { const p = el.requestFullscreen && el.requestFullscreen(); if (p && p.catch) p.catch(() => {}); } catch {}
+  lockMouse();
+});
+canvas.addEventListener('pointerdown', e => {
+  if (e.pointerType === 'touch' || noLock) { look = look || { id: e.pointerId, x: e.clientX, y: e.clientY }; return; }
+  if (locked) toggle(target); else lockMouse();
+});
+addEventListener('pointermove', e => {
+  if (locked && e.pointerType === 'mouse') { turn(e.movementX, e.movementY, 0.0022); return; }
+  if (look && e.pointerId === look.id) { turn(e.clientX - look.x, e.clientY - look.y, touch ? 0.006 : 0.004); look.x = e.clientX; look.y = e.clientY; }
+});
+const endLook = e => { if (look && e.pointerId === look.id) look = null; };
+addEventListener('pointerup', endLook); addEventListener('pointercancel', endLook);
+function turn(dx, dy, k) { yaw -= dx * k; pitch = clamp(pitch - dy * k, -1.45, 1.45); }
+
+const joyEl = $('joy'), knob = $('knob');
+function joyMove(e) {
+  const r = joyEl.getBoundingClientRect(), m = r.width / 2;
+  let dx = e.clientX - r.left - m, dy = e.clientY - r.top - m;
+  const d = Math.hypot(dx, dy); if (d > m) { dx *= m / d; dy *= m / d; }
+  joy.x = dx / m; joy.y = dy / m; knob.style.transform = `translate(${dx}px,${dy}px)`;
+}
+joyEl.addEventListener('pointerdown', e => { e.preventDefault(); joy.id = e.pointerId; joyEl.setPointerCapture(e.pointerId); joyMove(e); });
+joyEl.addEventListener('pointermove', e => { if (e.pointerId === joy.id) joyMove(e); });
+const joyEnd = e => { if (e.pointerId === joy.id) { joy.id = null; joy.x = joy.y = 0; knob.style.transform = ''; } };
+joyEl.addEventListener('pointerup', joyEnd); joyEl.addEventListener('pointercancel', joyEnd);
+$('jump').addEventListener('pointerdown', e => { e.preventDefault(); jumpReq = true; });
+$('door').addEventListener('pointerdown', e => { e.preventDefault(); toggle(target); });
+
+// ================= PINTU =================
+const ray = new THREE.Raycaster(); ray.far = 2.8;
+const leaves3 = doors.map(d => d.leaf), dir = new THREE.Vector3(), eye = new THREE.Vector3();
+let target = null;
+function findDoor() {
+  eye.set(pos.x, pos.y + EYE, pos.z);
+  dir.set(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+  ray.set(eye, dir);
+  const hit = ray.intersectObjects(leaves3, false)[0];
+  if (!hit) return null;
+  for (let t = 0.2; t < hit.distance - 0.15; t += 0.15) if (solidAt(eye.x + dir.x * t, eye.y + dir.y * t, eye.z + dir.z * t)) return null;
+  return doors[leaves3.indexOf(hit.object)];
+}
+function toggle(d) {
+  if (!d) return;
+  if (d.target) { d.target = 0; return; }
+  const p = d.pivot.position, away = d.axis === 'x' ? Math.sign(p.z - pos.z) || 1 : Math.sign(p.x - pos.x) || 1;
+  d.target = (d.axis === 'x' ? -away : away) * d.dir * Math.PI / 2;
+}
+
+// ================= LOOP =================
+function step(dt) {
+  for (const d of doors) if (d.angle !== d.target) {
+    const s = 3.5 * dt, diff = d.target - d.angle;
+    d.angle = Math.abs(diff) <= s ? d.target : d.angle + Math.sign(diff) * s;
+    d.pivot.rotation.y = d.angle; d.pivot.updateMatrixWorld(true); doorBox(d);
+  }
+  let f = 0, s = 0, run = keys.has('ShiftLeft') || keys.has('ShiftRight');
+  if (keys.has('KeyW') || keys.has('ArrowUp')) f++;
+  if (keys.has('KeyS') || keys.has('ArrowDown')) f--;
+  if (keys.has('KeyD') || keys.has('ArrowRight')) s++;
+  if (keys.has('KeyA') || keys.has('ArrowLeft')) s--;
+  let mag = Math.min(1, Math.hypot(f, s));
+  if (joy.id !== null) { f = -joy.y; s = joy.x; mag = Math.min(1, Math.hypot(f, s)); run = mag > 0.92; }
+  let mx = -Math.sin(yaw) * f + Math.cos(yaw) * s, mz = -Math.cos(yaw) * f - Math.sin(yaw) * s;
+  const len = Math.hypot(mx, mz); if (len) { mx *= mag / len; mz *= mag / len; }
+  const sp = run ? RUN : WALK, k = 1 - Math.exp(-(grounded ? 14 : 3) * dt);
+  vel.x += (mx * sp - vel.x) * k; vel.z += (mz * sp - vel.z) * k;
+  const n = Math.max(1, Math.ceil(Math.hypot(vel.x, vel.z) * dt / 0.12));
+  for (let i = 0; i < n; i++) { pos.x += vel.x * dt / n; pos.z += vel.z * dt / n; pushOut(); }
+
+  if (jumpReq && (grounded || coyote > 0)) { vy = JUMP; grounded = false; coyote = 0; }
+  jumpReq = false;
+  vy -= GRAV * dt;
+  let ny = pos.y + vy * dt;
+  const g = groundAt(pos.y + (grounded ? STEP : 0.05));
+  if (vy <= 0 && ny <= g) { ny = g; vy = 0; grounded = true; }
+  else if (grounded && vy <= 0 && pos.y - g < STEP) { ny = g; vy = 0; }
+  else grounded = false;
+  if (vy > 0) { const c = ceilAt(); if (ny + HEIGHT > c) { ny = c - HEIGHT; vy = 0; } }
+  pos.y = ny; coyote = grounded ? 0.12 : coyote - dt;
+
+  const moving = Math.hypot(vel.x, vel.z);
+  bob = grounded && moving > 0.5 ? bob + dt * moving * 2.6 : bob * 0.9;
+  cam.position.set(pos.x, pos.y + EYE + Math.sin(bob * 2) * 0.03, pos.z);
+  cam.rotation.set(pitch, yaw, 0);
+}
+
+let uiT = 0;
+const prompt = $('prompt'), doorBtn = $('door');
+const clock = new THREE.Clock();
+function resize() { renderer.setSize(innerWidth, innerHeight); cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); }
+addEventListener('resize', resize); resize();
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  step(dt);
+  if ((uiT -= dt) <= 0) {
+    uiT = 0.12;
+    target = findDoor();
+    const msg = target ? (target.target ? 'Tutup pintu' : 'Buka pintu') : '';
+    prompt.hidden = !msg; prompt.textContent = touch ? msg : 'E · ' + msg;
+    doorBtn.disabled = !target; doorBtn.textContent = target && target.target ? 'Tutup' : 'Buka';
+  }
+  renderer.render(scene, cam);
+});
+</script>
