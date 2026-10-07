@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { buildSite, SITE_W, SITE_D } from '../model.js';
+import { separate } from './zfight.mjs';
 
 // GLTFExporter memakai FileReader dari browser; sediakan versi minimal untuk Node.
 globalThis.FileReader ??= class {
@@ -17,6 +18,10 @@ globalThis.FileReader ??= class {
 
 const { site } = buildSite();
 site.position.set(-SITE_W / 2, 0, -SITE_D / 2);
+// Pisahkan permukaan yang berimpit/terlalu rapat supaya tidak berkedip (z-fighting).
+const z = separate(site);
+console.log(`Anti-kedip: ${z.fixed} sisi dipisahkan, sisa konflik ${z.remaining}`);
+if (z.remaining) process.exit(1);
 const scene = new THREE.Scene();
 scene.add(site);
 

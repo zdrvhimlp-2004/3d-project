@@ -3,7 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build:glb": "node scripts/build-glb.mjs"
+    "build:glb": "node scripts/build-glb.mjs",
+    "check:zfight": "node scripts/check-zfight.mjs --strict",
+    "verify:glb": "node scripts/verify-glb.mjs"
   },
   "dependencies": {
     "three": "0.160.0"

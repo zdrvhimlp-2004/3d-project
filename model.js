@@ -108,14 +108,14 @@ function wall(p, x0, z0, x1, z1, y, h, t, mat, ops = []) {
     const oh = Math.min(o.h ?? (kind === 'win' ? 1.3 : 2.1), h - y0);
     const a = o.at - w / 2, b = o.at + w / 2;
     seg(cur, a, y, h); seg(a, b, y, y0); seg(a, b, y + y0 + oh, h - y0 - oh);
-    if (kind === 'win') { place(o.at, y + y0, w, oh, M.glass, 0.04); place(o.at, y + y0 - 0.05, w + 0.1, 0.05, M.white, t + 0.08); }
+    if (kind === 'win') { place(o.at, y + y0, w, oh, M.glass, 0.04); place(o.at, y + y0 - 0.05, w + 0.1, 0.065, M.white, t + 0.08); }
     if (kind === 'door') door(a + 0.02, 1, w - 0.04, oh - 0.02);
     if (kind === 'door2') { door(a + 0.015, 1, w / 2 - 0.03, oh - 0.02); door(b - 0.015, -1, w / 2 - 0.03, oh - 0.02); }
     cur = b;
   });
   seg(cur, L, y, h);
 }
-const part = (p, x0, z0, x1, z1, y, h, ops) => wall(p, x0, z0, x1, z1, y, h, 0.12, M.wallIn, ops);
+const part = (p, x0, z0, x1, z1, y, h, ops) => wall(p, x0, z0, x1, z1, y, h - (z0 === z1 ? 0.03 : 0.06), 0.12, M.wallIn, ops);
 
 function slab(p, x0, z0, x1, z1, y, t, mat, hole) {
   if (!hole) return bx(p, (x0 + x1) / 2, y, (z0 + z1) / 2, x1 - x0, t, z1 - z0, mat);
@@ -148,14 +148,20 @@ function building(parent, o) {
   const H = o.h ?? FLOOR_H, FL = f => 0.3 + f * H;
   const w = o.x1 - o.x0, d = o.z1 - o.z0, cx = o.x0 + w / 2, cz = o.z0 + d / 2;
   const ext = m(o.color);
-  const sides = { N: [o.x0, o.z0, o.x1, o.z0], S: [o.x0, o.z1, o.x1, o.z1], W: [o.x0, o.z0, o.x0, o.z1], E: [o.x1, o.z0, o.x1, o.z1] };
+  // N/S menerus sampai sudut luar, W/E berhenti di muka dalamnya: sudut rapat tanpa bidang berimpit.
+  const T = 0.2, hT = T / 2;
+  const nx0 = o.skip?.includes('W') ? o.x0 + hT : o.x0 - hT, nx1 = o.skip?.includes('E') ? o.x1 - hT : o.x1 + hT;
+  const sides = { N: [nx0, o.z0, nx1, o.z0], S: [nx0, o.z1, nx1, o.z1], W: [o.x0, o.z0 + hT, o.x0, o.z1 - hT], E: [o.x1, o.z0 + hT, o.x1, o.z1 - hT] };
+  const shift = { N: o.x0 - nx0, S: o.x0 - nx0, W: -hT, E: -hT };
   const floors = [];
   for (let f = 0; f < (o.floors || 1); f++) {
     const fg = grp(g, 0, 0, 0, 0, `${o.name} Lt${f + 1}`);
     Object.assign(fg.userData, { merge: true, id: o.id, floor: f });
     floors.push(fg);
-    if (f === 0) bx(fg, cx, 0, cz, w + 0.3, 0.3, d + 0.3, M.tile);
-    else slab(fg, o.x0, o.z0, o.x1, o.z1, FL(f) - 0.2, 0.2, M.tile, o.hole);
+    if (f === 0) {
+      const [px0, pz0, px1, pz1] = o.plinth ?? [o.x0 - 0.15, o.z0 - 0.15, o.x1 + 0.15, o.z1 + 0.15];
+      bx(fg, (px0 + px1) / 2, 0, (pz0 + pz1) / 2, px1 - px0, 0.3, pz1 - pz0, M.tile);
+    } else slab(fg, o.x0 - hT, o.z0 - hT, o.x1 + hT, o.z1 + hT, FL(f) - 0.2, 0.2, M.tile, o.hole);
     for (const s of Object.keys(sides)) {
       if (o.skip?.includes(s)) continue;
       const len = s === 'N' || s === 'S' ? w : d;
@@ -167,7 +173,7 @@ function building(parent, o) {
           if (!ops.some(op => Math.abs(op.at - at) < (op.w ?? 1) / 2 + 0.9)) ops.push({ at, kind: 'win', w: o.winW });
         }
       }
-      wall(fg, ...sides[s], FL(f), H - 0.2, 0.2, ext, ops);
+      wall(fg, ...sides[s], FL(f), H - 0.2, T, ext, ops.map(op => ({ ...op, at: op.at + shift[s] })));
     }
   }
   const roof = grp(g, 0, 0, 0, 0, `${o.name} Atap`);
@@ -189,28 +195,28 @@ function bunkBed(p, x, y, z, ry) {
   const g = grp(p, x, y, z, ry, 'Ranjang Susun');
   for (const sx of [-0.45, 0.45]) for (const sz of [-0.97, 0.97]) bx(g, sx, 0, sz, 0.06, 1.75, 0.06, M.metal);
   [[0.3, M.blanket], [1.25, M.blanket2]].forEach(([yy, bl]) => {
-    bx(g, 0, yy, 0, 0.96, 0.06, 2.0, M.metal);
-    bx(g, 0, yy + 0.06, 0, 0.88, 0.14, 1.92, M.mattress);
-    bx(g, 0, yy + 0.2, -0.72, 0.55, 0.1, 0.32, M.pillow);
-    bx(g, 0, yy + 0.2, 0.32, 0.9, 0.04, 1.2, bl);
+    bx(g, 0, yy, 0, 0.9, 0.06, 1.94, M.metal);
+    bx(g, 0, yy + 0.06, 0, 0.84, 0.14, 1.86, M.mattress);
+    bx(g, 0, yy + 0.2, -0.7, 0.55, 0.1, 0.32, M.pillow);
+    bx(g, 0, yy + 0.2, 0.3, 0.87, 0.04, 1.2, bl);
   });
-  bx(g, -0.47, 1.45, 0, 0.04, 0.04, 1.9, M.metal);
-  for (let i = 0; i < 4; i++) bx(g, 0.49, 0.35 + i * 0.3, 0.75, 0.04, 0.04, 0.4, M.metal);
+  bx(g, -0.5, 1.45, 0, 0.04, 0.05, 1.88, M.metal);
+  for (let i = 0; i < 4; i++) bx(g, 0.51, 0.35 + i * 0.3, 0.72, 0.04, 0.04, 0.4, M.metal);
 }
 function singleBed(p, x, y, z, ry, blanket = M.blanket) {
   const g = grp(p, x, y, z, ry, 'Ranjang');
   bx(g, 0, 0, 0, 0.95, 0.35, 2.0, M.wood);
-  bx(g, 0, 0.35, 0, 0.9, 0.15, 1.95, M.mattress);
-  bx(g, 0, 0.5, -0.72, 0.55, 0.1, 0.32, M.pillow);
-  bx(g, 0, 0.5, 0.3, 0.92, 0.04, 1.25, blanket);
-  bx(g, 0, 0, -1.0, 0.95, 0.9, 0.06, M.woodD);
+  bx(g, 0, 0.35, 0, 0.88, 0.15, 1.94, M.mattress);
+  bx(g, 0, 0.5, -0.7, 0.55, 0.1, 0.32, M.pillow);
+  bx(g, 0, 0.5, 0.3, 0.91, 0.04, 1.25, blanket);
+  bx(g, 0, 0, -1.03, 1.0, 0.9, 0.06, M.woodD);
 }
 function locker(p, x, y, z, ry, w = 1.0) {
   const g = grp(p, x, y, z, ry, 'Loker');
   bx(g, 0, 0, 0, w, 1.8, 0.5, M.locker);
-  bx(g, 0, 0, 0.255, 0.02, 1.8, 0.01, M.black);
-  for (const yy of [0.45, 0.9, 1.35]) bx(g, 0, yy, 0.255, w, 0.02, 0.01, M.black);
-  for (const sx of [-w / 4, w / 4]) for (const yy of [0.2, 0.65, 1.1, 1.55]) bx(g, sx + 0.12, yy, 0.27, 0.04, 0.08, 0.03, M.steel);
+  bx(g, 0, 0.01, 0.265, 0.02, 1.78, 0.03, M.black);
+  for (const yy of [0.45, 0.9, 1.35]) bx(g, 0, yy, 0.26, w - 0.02, 0.02, 0.02, M.black);
+  for (const sx of [-w / 4, w / 4]) for (const yy of [0.2, 0.65, 1.1, 1.55]) bx(g, sx + 0.12, yy, 0.29, 0.04, 0.08, 0.04, M.steel);
 }
 function desk(p, x, y, z, ry, w = 1.2, d = 0.6, h = 0.75, top = M.wood) {
   const g = grp(p, x, y, z, ry, 'Meja');
@@ -227,7 +233,7 @@ function chair(p, x, y, z, ry, mat = M.fabric) {
 function monitor(p, x, y, z, ry) {
   const g = grp(p, x, y, z, ry, 'Komputer');
   bx(g, 0, 0, 0, 0.18, 0.02, 0.15, M.black); bx(g, 0, 0.02, -0.02, 0.04, 0.15, 0.04, M.black);
-  bx(g, 0, 0.15, 0, 0.52, 0.32, 0.03, M.black); bx(g, 0, 0.17, 0.016, 0.48, 0.28, 0.005, M.darkGlass);
+  bx(g, 0, 0.15, 0, 0.52, 0.32, 0.03, M.black); bx(g, 0, 0.17, 0.02, 0.48, 0.28, 0.02, M.darkGlass);
   bx(g, 0, 0, 0.25, 0.42, 0.02, 0.14, M.black);
 }
 function whiteboard(p, x, y, z, ry, w = 2.4) {
@@ -238,11 +244,11 @@ function whiteboard(p, x, y, z, ry, w = 2.4) {
 function shelf(p, x, y, z, ry, w = 1.6, h = 1.8, d = 0.35, books = true) {
   const g = grp(p, x, y, z, ry, 'Rak');
   bx(g, -w / 2 + 0.02, 0, 0, 0.04, h, d, M.wood); bx(g, w / 2 - 0.02, 0, 0, 0.04, h, d, M.wood);
-  bx(g, 0, 0, -d / 2 + 0.01, w, h, 0.02, M.woodD);
+  bx(g, 0, 0, -d / 2 + 0.01, w - 0.08, h, 0.02, M.woodD);
   const n = Math.max(2, Math.round(h / 0.4));
   for (let i = 0; i <= n; i++) {
     const yy = i * (h - 0.03) / n;
-    bx(g, 0, yy, 0, w, 0.03, d, M.wood);
+    bx(g, 0, yy, 0.01, w - 0.08, 0.03, d - 0.02, M.wood);
     if (books && i < n) {
       let bxp = -w / 2 + 0.08, k = i;
       while (bxp < w / 2 - 0.1) { const bw = 0.05 + ((k * 7) % 3) * 0.015; bx(g, bxp + bw / 2, yy + 0.03, 0.02, bw, 0.22 + (k % 2) * 0.04, d - 0.1, BOOKS[k % BOOKS.length]); bxp += bw + 0.01; k++; }
@@ -253,18 +259,18 @@ function cabinet(p, x, y, z, ry, w = 0.5, h = 1.3) {
   const g = grp(p, x, y, z, ry, 'Lemari Arsip');
   bx(g, 0, 0, 0, w, h, 0.6, M.metal);
   const n = Math.round(h / 0.33);
-  for (let i = 0; i < n; i++) { bx(g, 0, i * h / n + 0.02, 0.301, w - 0.04, h / n - 0.04, 0.01, M.steel); bx(g, 0, (i + 0.6) * h / n, 0.31, 0.14, 0.03, 0.03, M.black); }
+  for (let i = 0; i < n; i++) { bx(g, 0, i * h / n + 0.02, 0.31, w - 0.04, h / n - 0.04, 0.02, M.steel); bx(g, 0, (i + 0.6) * h / n, 0.335, 0.14, 0.03, 0.03, M.black); }
 }
 function wardrobe(p, x, y, z, ry, w = 1.0) {
   const g = grp(p, x, y, z, ry, 'Lemari Pakaian');
   bx(g, 0, 0, 0, w, 1.9, 0.55, M.wood);
-  bx(g, 0, 0.02, 0.276, 0.02, 1.86, 0.01, M.woodD);
-  for (const sx of [-0.08, 0.08]) bx(g, sx, 0.95, 0.29, 0.03, 0.18, 0.03, M.steel);
+  bx(g, 0, 0.02, 0.285, 0.02, 1.86, 0.02, M.woodD);
+  for (const sx of [-0.08, 0.08]) bx(g, sx, 0.95, 0.3, 0.03, 0.18, 0.04, M.steel);
 }
 function sofa(p, x, y, z, ry, w = 1.8) {
   const g = grp(p, x, y, z, ry, 'Sofa');
   bx(g, 0, 0, 0, w, 0.42, 0.85, M.fabric2); bx(g, 0, 0.42, -0.32, w, 0.42, 0.2, M.fabric2);
-  bx(g, -w / 2 + 0.1, 0.42, 0, 0.2, 0.2, 0.85, M.fabric2); bx(g, w / 2 - 0.1, 0.42, 0, 0.2, 0.2, 0.85, M.fabric2);
+  bx(g, -w / 2 + 0.09, 0.42, 0, 0.2, 0.2, 0.87, M.fabric2); bx(g, w / 2 - 0.09, 0.42, 0, 0.2, 0.2, 0.87, M.fabric2);
 }
 function plant(p, x, y, z, s = 1) {
   const g = grp(p, x, y, z, 0, 'Tanaman Pot');
@@ -298,13 +304,13 @@ function washTrough(p, x, y, z, ry, len, n) {
   const g = grp(p, x, y, z, ry, 'Tempat Wudhu');
   bx(g, 0, 0, 0, len, 0.75, 0.55, M.tileBlue);
   bx(g, 0, 0.75, 0, len - 0.1, 0.02, 0.4, M.concrete);
-  bx(g, 0, 0, -0.3, len, 1.25, 0.08, M.tile);
+  bx(g, 0, 0, -0.315, len, 1.25, 0.08, M.tile);
   for (let i = 0; i < n; i++) { const sx = -len / 2 + len * (i + 0.5) / n; bx(g, sx, 1.0, -0.22, 0.04, 0.04, 0.18, M.steel); bx(g, sx, 0, 0.6, 0.35, 0.15, 0.35, M.concrete); }
 }
 function sinkCounter(p, x, y, z, ry, w = 1.2) {
   const g = grp(p, x, y, z, ry, 'Wastafel');
   bx(g, 0, 0, 0, w, 0.85, 0.6, M.steel); bx(g, 0, 0.8, 0.02, w * 0.6, 0.06, 0.4, M.black);
-  bx(g, 0, 0.85, -0.22, 0.04, 0.3, 0.04, M.steel); bx(g, 0, 1.13, -0.14, 0.04, 0.04, 0.18, M.steel);
+  bx(g, 0, 0.85, -0.22, 0.04, 0.3, 0.04, M.steel); bx(g, 0, 1.12, -0.13, 0.05, 0.05, 0.18, M.steel);
 }
 function stove(p, x, y, z, ry, w = 1.6) {
   const g = grp(p, x, y, z, ry, 'Kompor Besar');
@@ -314,14 +320,14 @@ function stove(p, x, y, z, ry, w = 1.6) {
 }
 function fridge(p, x, y, z, ry) {
   const g = grp(p, x, y, z, ry, 'Kulkas');
-  bx(g, 0, 0, 0, 0.8, 1.9, 0.7, M.white); bx(g, 0, 1.2, 0.351, 0.78, 0.01, 0.01, M.metal);
-  bx(g, 0.3, 0.6, 0.37, 0.03, 0.4, 0.03, M.steel); bx(g, 0.3, 1.4, 0.37, 0.03, 0.3, 0.03, M.steel);
+  bx(g, 0, 0, 0, 0.8, 1.9, 0.7, M.white); bx(g, 0, 1.2, 0.36, 0.78, 0.02, 0.02, M.metal);
+  bx(g, 0.3, 0.6, 0.38, 0.03, 0.4, 0.04, M.steel); bx(g, 0.3, 1.4, 0.38, 0.03, 0.3, 0.04, M.steel);
 }
 function clinicBed(p, x, y, z, ry, curtain = false) {
   const g = grp(p, x, y, z, ry, 'Bed Pasien');
   bx(g, 0, 0, 0, 0.9, 0.6, 1.95, M.steel); bx(g, 0, 0.6, 0, 0.85, 0.12, 1.9, M.curtain);
   bx(g, 0, 0.72, -0.72, 0.5, 0.1, 0.3, M.pillow);
-  if (curtain) { bx(g, -0.75, 0, 0, 0.03, 2.1, 0.03, M.steel); bx(g, -0.75, 0.15, 0.2, 0.02, 1.85, 2.0, M.curtain); }
+  if (curtain) { bx(g, -0.75, 0, 0, 0.05, 2.1, 0.05, M.steel); bx(g, -0.75, 0.15, 0.2, 0.02, 1.85, 2.0, M.curtain); }
 }
 function trashSet(p, x, z, ry = 0) {
   const g = grp(p, x, 0, z, ry, 'Tempat Sampah');
@@ -343,7 +349,7 @@ function car(p, x, z, ry, color, kind = 'sedan') {
   if (kind === 'pickup') {
     bx(g, 0, 1.0, 1.0, 1.7, 0.6, 1.5, M.darkGlass); bx(g, 0, 1.6, 1.0, 1.7, 0.06, 1.5, body);
     for (const sx of [-0.86, 0.86]) bx(g, sx, 1.0, -1.1, 0.06, 0.45, 2.1, body);
-    bx(g, 0, 1.0, -2.17, 1.78, 0.45, 0.06, body);
+    bx(g, 0, 1.0, -2.17, 1.66, 0.45, 0.06, body);
     for (let i = 0; i < 3; i++) bx(g, -0.4 + i * 0.4, 1.0, -1.2 + (i % 2) * 0.5, 0.36, 0.3, 0.5, M.rice);
   }
   for (const sx of [-0.85, 0.85]) for (const sz of [-len / 2 + 0.8, len / 2 - 0.8]) wheel(g, sx, 0.33, sz, 0.33, 0.24, M.black);
@@ -385,7 +391,7 @@ function fillAsrama(B) {
     for (let r = 1; r < 5; r++) part(fg, x0, zs[r], cor, zs[r], y, h);
     // blok KM/WC
     for (let i = 0; i < 7; i++) { stall(fg, 2.85 + i * 1.3, y, 19.95, 0); stall(fg, 2.85 + i * 1.3, y, 25.15, Math.PI); }
-    washTrough(fg, 7.2, y, 22.85, 0, 8, 8); washTrough(fg, 7.2, y, 22.25, Math.PI, 8, 8);
+    washTrough(fg, 7.2, y, 22.9, 0, 8, 8); washTrough(fg, 7.2, y, 22.18, Math.PI, 8, 8);
     // kamar
     for (let r = 0; r < 5; r++) {
       const s = zs[r], e = zs[r + 1];
@@ -414,7 +420,7 @@ function fillAsrama(B) {
 function fillMasjid(hall, wudhu, root) {
   const fg = hall.floors[0], y = hall.FL(0);
   bx(fg, 30.8, y, 36.15, 15.0, 0.02, 21.5, M.carpet);
-  for (let x = 24.9; x < 37.6; x += 1.2) bx(fg, x, y + 0.02, 36.15, 0.06, 0.005, 21.5, M.carpetLine);
+  for (let x = 24.9; x < 37.6; x += 1.2) bx(fg, x, y + 0.02, 36.15, 0.06, 0.015, 21.4, M.carpetLine);
   // mihrab & mimbar di dinding kiblat (barat)
   const mh = grp(fg, 23.3, y, 36.15, Math.PI / 2, 'Mihrab');
   for (const sx of [-0.95, 0.95]) bx(mh, sx, 0, 0.1, 0.3, 2.8, 0.3, M.gold);
@@ -439,7 +445,7 @@ function fillMasjid(hall, wudhu, root) {
   washTrough(wf, 43.8, wy, 41.05, -Math.PI / 2, 3.6, 5); washTrough(wf, 43.8, wy, 45.15, -Math.PI / 2, 3.6, 5);
   // serambi
   const sr = grp(root, 0, 0, 0, 0, 'Serambi'); Object.assign(sr.userData, { merge: true, id: 'masjid' });
-  bx(sr, 41.35, 0, 32.05, 5.7, 0.3, 13.9, M.tile);
+  bx(sr, 41.4, 0, 31.925, 5.6, 0.3, 13.95, M.tile);
   for (const sz of [25.4, 29.9, 34.4, 38.8]) cy(sr, 43.9, 0.3, sz, 0.18, 3.9, M.white);
   for (let i = 0; i < 3; i++) bx(sr, 44.45 + i * 0.25, 0, 32.05, 0.25, 0.3 - i * 0.1, 6, M.tile);
   // menara
@@ -603,22 +609,24 @@ export function buildSite() {
   // lahan, jalan, paving
   const ground = grp(site, 0, 0, 0, 0, 'Lahan & Jalan'); ground.userData.merge = true;
   bx(ground, SITE_W / 2, -0.05, SITE_D / 2, SITE_W, 0.05, SITE_D, M.sand);
-  bx(ground, 30, 0, 9.3, 12, 0.03, 18.6, M.asphalt);
+  bx(ground, 30, 0, 7.3, 12, 0.03, 14.6, M.asphalt);
   bx(ground, 30, 0, 16.6, 56, 0.03, 4, M.asphalt);
-  for (let x = 4; x < 58; x += 3) bx(ground, x, 0.03, 16.6, 1.5, 0.005, 0.12, M.stripe);
-  bx(ground, 21.6, 0, 50, 2.6, 0.04, 62, M.paving);
-  bx(ground, 45.7, 0, 50, 2.6, 0.04, 62, M.paving);
+  for (let x = 4; x < 58; x += 3) bx(ground, x, 0.03, 16.6, 1.5, 0.015, 0.12, M.stripe);
+  bx(ground, 21.6, 0, 49.1, 2.6, 0.04, 61, M.paving);
+  bx(ground, 45.7, 0, 49.1, 2.6, 0.04, 61, M.paving);
   bx(ground, 33.65, 0, 48.75, 21.1, 0.04, 2.5, M.paving);
   bx(ground, 30, 0, 80.9, 56, 0.04, 2.6, M.paving);
   bx(ground, 33.65, 0, 21.8, 21.1, 0.04, 6.4, M.paving);
 
   // pagar keliling + gerbang
   const fence = grp(site, 0, 0, 0, 0, 'Pagar & Gerbang'); fence.userData.merge = true;
+  const posts = new Set();
+  const post = (x, z) => { const k = `${x.toFixed(2)},${z.toFixed(2)}`; if (!posts.has(k)) { posts.add(k); bx(fence, x, 0, z, 0.4, 2.0, 0.4, M.brick); } };
   const fenceRun = (x0, z0, x1, z1) => {
     const alongX = z0 === z1, L = alongX ? x1 - x0 : z1 - z0;
     if (alongX) { bx(fence, (x0 + x1) / 2, 0, z0, L, 0.9, 0.25, M.brick); bx(fence, (x0 + x1) / 2, 1.75, z0, L, 0.08, 0.08, M.black); }
     else { bx(fence, x0, 0, (z0 + z1) / 2, 0.25, 0.9, L, M.brick); bx(fence, x0, 1.75, (z0 + z1) / 2, 0.08, 0.08, L, M.black); }
-    for (let s = 0; s <= L + 0.01; s += 4) alongX ? bx(fence, x0 + Math.min(s, L), 0, z0, 0.4, 2.0, 0.4, M.brick) : bx(fence, x0, 0, z0 + Math.min(s, L), 0.4, 2.0, 0.4, M.brick);
+    for (let s = 0; s <= L + 0.01; s += 4) alongX ? post(x0 + Math.min(s, L), z0) : post(x0, z0 + Math.min(s, L));
     for (let s = 0.25; s < L; s += 0.25) alongX ? bx(fence, x0 + s, 0.9, z0, 0.03, 0.85, 0.03, M.black) : bx(fence, x0, 0.9, z0 + s, 0.03, 0.85, 0.03, M.black);
   };
   fenceRun(0, 0, 24.6, 0); fenceRun(35.4, 0, SITE_W, 0); fenceRun(0, SITE_D, SITE_W, SITE_D);
@@ -643,9 +651,9 @@ export function buildSite() {
     ops: [{ side: 'N', at: 16.9, kind: 'door' }, { side: 'S', at: 16.9, kind: 'door' }, { side: 'E', at: 9.25, kind: 'door2' }] });
   fillAsrama(asrama); label('asrama', 11, asrama.peak + 1, 49);
 
-  const hall = add({ id: 'masjid', x0: 23.1, z0: 25.1, x1: 38.5, z1: 47.2, floors: 1, h: 4.6, roof: 'flat', noWin: ['W'], winW: 1.4,
+  const hall = add({ id: 'masjid', x0: 23.1, z0: 25.1, x1: 38.5, z1: 47.2, plinth: [22.95, 24.95, 38.6, 47.35], floors: 1, h: 4.6, roof: 'flat', noWin: ['W'], winW: 1.4,
     ops: [{ side: 'E', at: 2.9, kind: 'door2' }, { side: 'E', at: 7.3, kind: 'door2' }, { side: 'E', at: 11.7, kind: 'door2' }, { side: 'E', at: 16, kind: 'door' }, { side: 'S', at: 4, kind: 'door2' }] });
-  const wudhu = building(site, { id: 'masjid', name: 'Ruang Wudhu', x0: 38.5, z0: 39, x1: 44.2, z1: 47.2, floors: 1, h: 3.4, roof: 'flat', skip: ['W'], color: C.ibadah,
+  const wudhu = building(site, { id: 'masjid', name: 'Ruang Wudhu', x0: 38.5, z0: 39, x1: 44.2, z1: 47.2, plinth: [38.6, 38.9, 44.35, 47.35], floors: 1, h: 3.4, roof: 'flat', skip: ['W'], color: C.ibadah,
     ops: [{ side: 'N', at: 3.5, kind: 'door' }, { side: 'S', at: 3.5, kind: 'door' }] });
   wudhu.g.userData.id = 'masjid';
   footprints.push({ id: 'masjid', name: 'Ruang Wudhu & Serambi', zone: 'ibadah', x0: 38.5, z0: 25.1, x1: 44.2, z1: 47.2, floors: 1, h: 3.4 });
@@ -684,8 +692,8 @@ export function buildSite() {
   const pk = grp(site, 0, 0, 0, 0, 'Parkir & RTH'); Object.assign(pk.userData, { merge: true, id: 'parkir' });
   bx(pk, 10.25, 0, 8.05, 16.5, 0.06, 12.1, M.asphalt);
   bx(pk, 20.55, 0, 8.05, 4.1, 0.1, 12.1, M.grass);
-  for (let i = 0; i <= 6; i++) bx(pk, 2.5 + i * 2.7, 0.06, 4.6, 0.1, 0.005, 4.8, M.stripe);
-  for (let i = 0; i <= 12; i++) bx(pk, 3.0 + i * 1.2, 0.06, 12.2, 0.06, 0.005, 2.6, M.stripe);
+  for (let i = 0; i <= 6; i++) bx(pk, 2.5 + i * 2.7, 0.06, 4.6, 0.1, 0.015, 4.8, M.stripe);
+  for (let i = 0; i <= 12; i++) bx(pk, 3.0 + i * 1.2, 0.06, 12.2, 0.06, 0.015, 2.6, M.stripe);
   for (const tz of [3.5, 8, 12.5]) tree(pk, 20.6, tz, 0.9, tz === 8 ? M.leaf2 : M.leaf);
   trashSet(pk, 17.6, 2.6);
   const cars = grp(site, 0, 0, 0, 0, 'Kendaraan'); Object.assign(cars.userData, { merge: true, id: 'parkir' });
@@ -700,9 +708,9 @@ export function buildSite() {
   // lapangan
   const lp = grp(site, 0, 0, 0, 0, 'Lapangan Serbaguna'); Object.assign(lp.userData, { merge: true, id: 'lapangan' });
   bx(lp, 30.05, 0, 90.45, 44.5, 0.08, 16.1, M.field);
-  const L = (x, z, w, d) => bx(lp, x, 0.08, z, w, 0.01, d, M.stripe);
+  const L = (x, z, w, d) => bx(lp, x, 0.08, z, w, w > d ? 0.015 : 0.03, d, M.stripe);
   L(30.05, 83.2, 42.9, 0.1); L(30.05, 97.7, 42.9, 0.1); L(8.6, 90.45, 0.1, 14.6); L(51.5, 90.45, 0.1, 14.6); L(30.05, 90.45, 0.1, 14.6);
-  const ring = new THREE.Mesh(new THREE.RingGeometry(2.9, 3.0, 48), M.stripe); ring.rotation.x = -Math.PI / 2; ring.position.set(30.05, 0.1, 90.45); lp.add(ring);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(2.9, 3.0, 48), M.stripe); ring.rotation.x = -Math.PI / 2; ring.position.set(30.05, 0.125, 90.45); lp.add(ring);
   for (const [x, dir] of [[8.6, -1], [51.5, 1]]) {
     for (const dz of [-1.5, 1.5]) bx(lp, x, 0, 90.45 + dz, 0.1, 2.0, 0.1, M.white);
     bx(lp, x, 2.0, 90.45, 0.1, 0.1, 3.1, M.white);
@@ -721,7 +729,7 @@ export function buildSite() {
   // TPS
   const tps = grp(lp, 0, 0, 0, 0, 'TPS');
   bx(tps, 56.5, 0, 82.8, 6, 0.15, 5, M.concrete);
-  bx(tps, 56.5, 0, 85.2, 6, 1.4, 0.2, M.concrete); bx(tps, 59.4, 0, 82.8, 0.2, 1.4, 5, M.concrete); bx(tps, 53.6, 0, 83.5, 0.2, 1.4, 3.6, M.concrete);
+  bx(tps, 56.5, 0.15, 85.2, 6, 1.4, 0.2, M.concrete); bx(tps, 59.4, 0.15, 82.65, 0.2, 1.4, 4.7, M.concrete); bx(tps, 53.6, 0.15, 83.35, 0.2, 1.4, 3.3, M.concrete);
   for (const tx of [54.9, 57.6]) { bx(tps, tx, 0.15, 83.8, 2.2, 1.2, 1.4, M.green); bx(tps, tx, 1.35, 83.8, 2.3, 0.08, 1.5, M.black); }
   trashSet(tps, 56.2, 81.4, Math.PI);
   bx(tps, 56.5, 2.6, 83.0, 6.4, 0.08, 5.0, M.metal);
